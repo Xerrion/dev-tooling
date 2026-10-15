@@ -1,0 +1,20 @@
+[package]
+name = "xerrion_dev_tooling_installer"
+version = "0.1.0"
+edition = "2024"
+description = "Preview and apply development tooling profiles"
+
+[[bin]]
+name = "installer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["string"] }
+glob = "0.3"
+regex = "1.12"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shlex = "1.3"
+tempfile = "3.24"
+toml = "1.1"

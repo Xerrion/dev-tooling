@@ -1,6 +1,8 @@
 [tools]
 bun = "latest"
-node = "24.15.0"
+node = "26"
+prettier = "latest"
+markdownlint-cli2 = "latest"
 
 [vars]
 markdown_dir = "."
@@ -10,11 +12,11 @@ markdown_files = "'**/*.md'"
 description = "Check Markdown with the locked local markdownlint and Prettier"
 dir = "{{ vars.markdown_dir }}"
 run = [
-  "bun run markdownlint --ignore-path .gitignore {{ vars.markdown_files }}",
-  "bun run prettier --check --ignore-path .gitignore --ignore-path .prettierignore {{ vars.markdown_files }}",
+  "markdownlint-cli2 --ignore-path .gitignore {{ vars.markdown_files }}",
+  "prettier --check --ignore-path .gitignore --ignore-path .prettierignore {{ vars.markdown_files }}",
 ]
 
 [tasks."format:markdown"]
 description = "Format Markdown with the locked local Prettier"
 dir = "{{ vars.markdown_dir }}"
-run = "bun run prettier --write --ignore-path .gitignore --ignore-path .prettierignore {{ vars.markdown_files }}"
+run = "prettier --write --ignore-path .gitignore --ignore-path .prettierignore {{ vars.markdown_files }}"

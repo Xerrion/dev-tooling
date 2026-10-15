@@ -1,0 +1,4 @@
+# Lint levels belong in Cargo.toml; this file only configures lint behavior.
+avoid-breaking-exported-api = true
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250

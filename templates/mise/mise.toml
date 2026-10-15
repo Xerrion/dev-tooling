@@ -1,0 +1,31 @@
+# The installer keeps only dependencies available for the selected languages.
+# Language tools, variables, and tasks live in .mise/conf.d/tooling.toml.
+
+[tasks."check"]
+description = "Check lint, formatting, and types for all selected languages"
+depends = [
+  "check:python",
+  "check:javascript",
+  "typecheck:javascript",
+  "check:rust",
+  "check:lua",
+  "check:markdown",
+]
+
+[tasks."format"]
+description = "Format all selected languages"
+depends = [
+  "format:python",
+  "format:javascript",
+  "format:rust",
+  "format:lua",
+  "format:markdown",
+]
+
+[tasks."test"]
+description = "Run tests for all selected languages"
+depends = ["test:python", "test:javascript", "test:rust"]
+
+[tasks."deps"]
+description = "Sync dependencies for selected projects"
+depends = ["deps:python", "deps:javascript"]

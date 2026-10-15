@@ -1,0 +1,5 @@
+[toolchain]
+# Replace stable with an exact release in projects that need a pinned compiler.
+channel = "stable"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

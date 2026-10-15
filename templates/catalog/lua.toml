@@ -1,0 +1,26 @@
+schema_version = 1
+title = "Lua"
+profile = "mise/profiles/lua.toml"
+adapter = "generic"
+
+[aggregates]
+check = ["check:lua"]
+format = ["format:lua"]
+
+[[configs]]
+source = "stylua/stylua.toml"
+kind = "stylua"
+alternatives = ["stylua.toml", ".stylua.toml"]
+
+[[configs]]
+source = "stylua/.styluaignore"
+kind = "ignore"
+alternatives = []
+
+[[guidance]]
+task = "check:lua"
+when = "After Lua edits, check StyLua formatting."
+
+[[guidance]]
+task = "format:lua"
+when = "When Lua formatting needs correction, run StyLua."

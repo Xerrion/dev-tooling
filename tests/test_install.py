@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -17,6 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FRAGMENT = Path(".mise/conf.d/tooling.toml")
 START = "<!-- dev-tooling:start -->"
 END = "<!-- dev-tooling:end -->"
+AGGREGATES_START = "# dev-tooling:aggregates:start"
+AGGREGATES_END = "# dev-tooling:aggregates:end"
+CENTRAL_TEMPLATE = REPO_ROOT / "templates/mise/mise.toml"
+CENTRAL_TASKS = {"check", "format", "test", "deps"}
 
 
 class InstallTests(unittest.TestCase):
@@ -159,10 +164,172 @@ class InstallTests(unittest.TestCase):
             self.write(self.project, relative, text)
         return {relative: text.encode() for relative, text in files.items()}
 
+    def workspace_project(self, project: Path, manager: str) -> tuple[dict, str]:
+        versions = {"npm": "10.9.2", "pnpm": "10.5.2", "yarn": "4.9.1"}
+        locks = {
+            "npm": ("package-lock.json", '{"name":"workspace-fixture","lockfileVersion":3,"packages":{}}\n'),
+            "pnpm": ("pnpm-lock.yaml", "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  web: {}\n  docs: {}\n"),
+            "yarn": ("yarn.lock", "__metadata:\n  version: 8\n"),
+        }
+        lockfile, lock = locks[manager]
+        manifest = {
+            "name": "workspace-fixture",
+            "private": True,
+            "packageManager": f"{manager}@{versions[manager]}",
+            "workspaces": ["web", "docs"],
+        }
+        files = {
+            "mise.toml": '[tools]\nnode = "24.15.0"\n',
+            "package.json": json.dumps(manifest) + "\n",
+            lockfile: lock,
+            "web/package.json": json.dumps(
+                {
+                    "name": "fixture-web",
+                    "private": True,
+                    "scripts": {"typecheck": "tsc --noEmit", "test": "node --test"},
+                }
+            )
+            + "\n",
+            "docs/package.json": '{"name":"fixture-docs","private":true}\n',
+            "web/.gitignore": "node_modules/\n",
+            "docs/.gitignore": "node_modules/\n",
+            "docs/README.md": "# Workspace documentation\n",
+        }
+        if manager == "pnpm":
+            files["pnpm-workspace.yaml"] = "packages:\n  - web\n  - docs\n"
+        for relative, text in files.items():
+            self.write(project, relative, text)
+        return {relative: text.encode() for relative, text in files.items()}, lockfile
+
+    def run_workspace_dependency_commands(
+        self, project: Path, manager: str, originals: dict, lockfile: str
+    ) -> list[list[str]]:
+        protected = ("package.json", lockfile, "web/package.json", "docs/package.json")
+        observed = []
+
+        def inspect_command(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+            parsed = self.resolved_command(arguments)
+            if Path(parsed[0]).name == "mise" and parsed[1:2] == ["trust"]:
+                return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
+            commands = [parsed]
+            if Path(parsed[0]).name == "mise" and parsed[1:2] == ["run"]:
+                tasks = self.generated(project)["tasks"]
+                commands = [
+                    self.resolved_command(command)
+                    for name in parsed[2:]
+                    if name in tasks
+                    for command in self.task_commands(tasks[name])
+                ]
+            assert commands, f"Unrecognized dependency operation: {arguments}"
+            for command in commands:
+                assert Path(command[0]).name == manager, command
+                assert any(word in command[1:] for word in ("ci", "install", "add")), command
+            for relative in protected:
+                self.assert_backup(project, relative, originals[relative])
+            directory = kwargs.get("cwd", project)
+            assert isinstance(directory, (str, Path))
+            assert Path(directory).resolve().is_relative_to(project.resolve()), directory
+            observed.extend(commands)
+            path = project / lockfile
+            if manager == "npm":
+                contents = json.loads(path.read_text(encoding="utf-8"))
+                contents["fixtureRevision"] = len(observed)
+                path.write_text(json.dumps(contents) + "\n", encoding="utf-8")
+            else:
+                path.write_bytes(path.read_bytes() + f"\n# Mock dependency operation {len(observed)}\n".encode())
+            return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
+
+        self.run_mock.reset_mock()
+        self.run_mock.side_effect = inspect_command
+        self.succeed(
+            "--tools",
+            "javascript",
+            "markdown",
+            "--javascript-dir",
+            "web",
+            "--markdown-dir",
+            "docs",
+            "--install-deps",
+            "--apply",
+            project=project,
+        )
+        assert len(observed) >= 2, "Expected dependency operations for both selected packages"
+        return observed
+
+    def managed_root_parts(self, contents: bytes) -> tuple[bytes, bytes, bytes]:
+        start = AGGREGATES_START.encode()
+        end = AGGREGATES_END.encode()
+        assert contents.count(start) == 1, "Expected exactly one aggregate start marker"
+        assert contents.count(end) == 1, "Expected exactly one aggregate end marker"
+        prefix, remainder = contents.split(start, 1)
+        assert end in remainder, "Aggregate markers are reversed"
+        block, suffix = remainder.split(end, 1)
+        return prefix, block, suffix
+
+    def root_mise(self, project: Path) -> Path:
+        for name in ("mise.toml", ".mise.toml"):
+            path = project / name
+            if path.is_file():
+                return path
+        raise AssertionError("Missing root mise configuration")
+
+    def central_tasks(self, project: Path | None = None) -> dict:
+        contents = self.root_mise(project or self.project).read_bytes()
+        tomllib.loads(contents.decode())
+        _, block, _ = self.managed_root_parts(contents)
+        return tomllib.loads(block.decode()).get("tasks", {})
+
+    def assert_root_preserved(self, path: Path, original: bytes) -> None:
+        current = path.read_bytes()
+        tomllib.loads(current.decode())
+        if current == original:
+            return
+        prefix, _, suffix = self.managed_root_parts(current)
+        if AGGREGATES_START.encode() in original:
+            old_prefix, _, old_suffix = self.managed_root_parts(original)
+            assert prefix == old_prefix
+            assert suffix == old_suffix
+        else:
+            assert prefix.startswith(original), "Original root mise content must remain an exact prefix"
+            assert not prefix[len(original) :].strip(), "Only padding may precede the appended managed block"
+            assert not suffix.strip(), "Unexpected content outside the appended managed block"
+
     def assert_preserved(self, project: Path, files: dict) -> None:
         for relative, original in files.items():
             with self.subTest(preserved=relative):
-                assert (project / relative).read_bytes() == original
+                path = project / relative
+                if Path(relative).as_posix() in ("mise.toml", ".mise.toml"):
+                    self.assert_root_preserved(path, original)
+                else:
+                    assert path.read_bytes() == original
+
+    def assert_central_dependencies(
+        self, project: Path, selected: set[str], preserved_aggregates: set[str] | None = None
+    ) -> None:
+        with CENTRAL_TEMPLATE.open("rb") as file:
+            template = tomllib.load(file)["tasks"]
+        assert template.keys() >= CENTRAL_TASKS
+        managed = self.central_tasks(project)
+        sources = [*sorted((project / ".mise/conf.d").glob("*.toml")), self.root_mise(project)]
+        available = set()
+        for source in sources:
+            with source.open("rb") as file:
+                available.update(tomllib.load(file).get("tasks", {}))
+        expected = {}
+        for name in sorted(CENTRAL_TASKS - (preserved_aggregates or set())):
+            dependencies = {
+                dependency
+                for dependency in template[name].get("depends", [])
+                if dependency in available and dependency.rsplit(":", 1)[-1] in selected
+            }
+            if dependencies:
+                expected[name] = dependencies
+        assert set(managed) == set(expected), f"Expected aggregates {sorted(expected)}, got {sorted(managed)}"
+        for name, task in managed.items():
+            actual = task.get("depends", [])
+            assert set(actual) == expected[name], f"{name}: expected {sorted(expected[name])}, got {actual}"
+            assert len(actual) == len(set(actual)), f"Duplicate dependencies in {name}"
+            assert "run" not in task, f"{name} should delegate through dependencies"
 
     def python_targets(self, generated: dict) -> list[str]:
         targets = generated["vars"]["python_files"]
@@ -174,6 +341,11 @@ class InstallTests(unittest.TestCase):
             command = call.args[0] if call.args else call.kwargs["args"]
             commands.append(shlex.split(command) if isinstance(command, str) else [str(part) for part in command])
         return commands
+
+    def resolved_command(self, command: list[str]) -> list[str]:
+        if len(command) > 3 and Path(command[0]).name == "mise" and command[1] == "exec" and "--" in command:
+            return command[command.index("--") + 1 :]
+        return command
 
     def task_commands(self, task: dict) -> list[list[str]]:
         commands = task.get("run", [])
@@ -209,7 +381,7 @@ class InstallTests(unittest.TestCase):
         for relative in ("ruff.toml", ".ruff.toml", "ty.toml"):
             assert not (self.project / relative).exists(), relative
         self.assert_preserved(self.project, originals)
-        assert not (self.project / "mise.toml").exists()
+        self.assert_central_dependencies(self.project, {"python"})
         self.run_mock.assert_not_called()
 
     def test_apply_preserves_agent_surroundings_and_is_idempotent(self) -> None:
@@ -469,7 +641,7 @@ class InstallTests(unittest.TestCase):
             ".markdownlint.json",
         ):
             assert not (self.project / relative).exists(), relative
-        assert self.backups(self.project, "mise.toml") == []
+        self.assert_backup(self.project, "mise.toml", originals["mise.toml"])
         assert self.backups(self.project, "engine/rust-toolchain.toml") == []
         before = self.snapshot()
         self.succeed(*arguments)
@@ -621,13 +793,13 @@ class InstallTests(unittest.TestCase):
         assert "check:javascript" in data["tasks"]
         assert "check:markdown" in data["tasks"]
 
-    def test_existing_pinned_rust_toolchain_is_not_replaced_even_with_replace_configs(
-        self,
-    ) -> None:
+    def test_existing_pinned_rust_toolchain_is_not_replaced_by_config_overwrite(self) -> None:
         originals = self.monorepo()
-        self.succeed("--tools", "rust", "--rust-dir", "engine", "--replace-configs", "--apply")
-        self.assert_preserved(self.project, originals)
-        assert self.backups(self.project, "engine/rust-toolchain.toml") == []
+        for flag in ("--replace-configs", "--overwrite"):
+            with self.subTest(flag=flag):
+                self.succeed("--tools", "rust", "--rust-dir", "engine", flag, "--apply")
+                self.assert_preserved(self.project, originals)
+                assert self.backups(self.project, "engine/rust-toolchain.toml") == []
 
     def test_relative_language_directory_traversal_is_rejected(self) -> None:
         for tool in ("python", "javascript", "rust", "lua", "markdown"):
@@ -663,6 +835,8 @@ class InstallTests(unittest.TestCase):
             ("lua", ".mise", True),
             ("lua", ".mise/conf.d", True),
             ("lua", FRAGMENT.as_posix(), False),
+            ("lua", "mise.toml", False),
+            ("lua", ".mise.toml", False),
             ("lua", "stylua.toml", False),
             ("lua", ".stylua.toml", False),
             ("lua", ".styluaignore", False),
@@ -744,7 +918,7 @@ class InstallTests(unittest.TestCase):
     def test_missing_project_is_reported_without_writes(self) -> None:
         self.refuse_without_writes("--tools", "lua", "--apply", project=self.sandbox / "missing")
 
-    def test_replace_configs_rejects_unsupported_prettier_formats_before_writes(self) -> None:
+    def test_config_overwrite_converts_prettier_alternatives_with_deletion_backups(self) -> None:
         alternatives = (
             ("prettier.config.js", "export default { printWidth: 79 };\n"),
             ("prettier.config.cjs", "module.exports = { printWidth: 79 };\n"),
@@ -752,14 +926,25 @@ class InstallTests(unittest.TestCase):
             (".prettierrc.cjs", "module.exports = { printWidth: 79 };\n"),
             (".prettierrc.toml", "printWidth = 79\n"),
         )
-        for index, (relative, text) in enumerate(alternatives):
-            with self.subTest(config=relative):
-                project = self.sandbox / f"unsupported-prettier-{index}"
-                project.mkdir()
-                self.write(project, "package.json", '{"private":true}\n')
-                self.write(project, "AGENTS.md", "# Preserve local instructions\n")
-                self.write(project, relative, text)
-                self.refuse_without_writes("--tools", "markdown", "--replace-configs", "--apply", project=project)
+        for flag in ("--replace-configs", "--overwrite"):
+            for index, (relative, text) in enumerate(alternatives):
+                with self.subTest(flag=flag, config=relative):
+                    project = self.sandbox / f"prettier-conversion-{flag.removeprefix('--')}-{index}"
+                    project.mkdir()
+                    manifest = '{"private":true}\n'
+                    self.write(project, "package.json", manifest)
+                    self.write(project, relative, text)
+                    self.succeed("--tools", "markdown", flag, "--apply", project=project)
+                    assert not (project / relative).exists(), "Do not put JSON into the old JS/CJS/TOML filename"
+                    canonical = project / ".prettierrc.json"
+                    assert canonical.is_file()
+                    assert isinstance(json.loads(canonical.read_text(encoding="utf-8")), dict)
+                    self.assert_backup(project, relative, text.encode())
+                    assert (project / "package.json").read_bytes() == manifest.encode()
+                    before = self.snapshot()
+                    self.succeed("--tools", "markdown", flag, "--apply", project=project)
+                    assert self.snapshot() == before
+                    self.run_mock.assert_not_called()
 
     def test_replace_configs_accepts_compatible_prettier_formats(self) -> None:
         alternatives = (
@@ -782,7 +967,8 @@ class InstallTests(unittest.TestCase):
                 if not existing.exists() or existing.read_bytes() != text.encode():
                     self.assert_backup(project, relative, text.encode())
                 else:
-                    assert canonical != existing and canonical.is_file(), "Replacement did not install a config"
+                    assert canonical != existing, "Replacement did not install a config"
+                    assert canonical.is_file(), "Replacement did not install a config"
                     assert canonical.read_bytes() != text.encode()
                 assert manifest.read_bytes() == original_manifest
                 self.run_mock.assert_not_called()
@@ -841,7 +1027,7 @@ class InstallTests(unittest.TestCase):
         for relative in ("ruff.toml", "ty.toml", "biome.json", ".markdownlint.json"):
             assert not (self.project / relative).exists(), relative
         self.assert_preserved(self.project, {relative: text.encode() for relative, text in files.items()})
-        assert self.backups(self.project, "mise.toml") == []
+        self.assert_backup(self.project, "mise.toml", files["mise.toml"].encode())
         assert self.backups(self.project, ".mise/conf.d/10-project.toml") == []
         self.run_mock.assert_not_called()
 
@@ -875,18 +1061,21 @@ class InstallTests(unittest.TestCase):
                     commands = self.task_commands(tasks[name])
                     assert commands, name
                     for command in commands:
+                        parsed = self.resolved_command(command)
                         if manager == "npm":
-                            assert command[:2] == ["npm", "exec"] or command[0] == "npx", command
+                            assert parsed[:2] == ["npm", "exec"] or parsed[0] == "npx", parsed
                         else:
-                            assert command[:2] == [manager, "exec"], command
+                            assert parsed[:2] == [manager, "exec"], parsed
                 commands = self.recorded_commands()
                 assert commands, "--install-deps did not execute a dependency command"
-                installation = list(commands)
+                installation = [self.resolved_command(command) for command in commands]
                 for command in commands:
                     if Path(command[0]).name == "mise" and "run" in command:
                         for argument in command[1:]:
                             if argument in tasks:
-                                installation.extend(self.task_commands(tasks[argument]))
+                                installation.extend(
+                                    self.resolved_command(nested) for nested in self.task_commands(tasks[argument])
+                                )
                 assert any(
                     Path(command[0]).name == manager and any(word in command[1:] for word in ("install", "add"))
                     for command in installation
@@ -900,7 +1089,76 @@ class InstallTests(unittest.TestCase):
                 assert not list(project.rglob("bun.lockb"))
                 self.assert_preserved(project, {relative: text.encode() for relative, text in files.items()})
 
+    def test_workspace_root_package_manager_is_inherited_by_nested_web_and_docs(self) -> None:
+        for manager in ("npm", "pnpm", "yarn"):
+            with self.subTest(manager=manager):
+                project = self.sandbox / f"inherited-workspace-manager-{manager}"
+                project.mkdir()
+                originals, _ = self.workspace_project(project, manager)
+                arguments = (
+                    "--tools",
+                    "javascript",
+                    "markdown",
+                    "--javascript-dir",
+                    "web",
+                    "--markdown-dir",
+                    "docs",
+                    "--apply",
+                )
+                self.succeed(*arguments, project=project)
+                generated = self.generated(project)
+                assert generated["vars"]["javascript_dir"] == "web"
+                assert generated["vars"]["markdown_dir"] == "docs"
+                tasks = generated["tasks"]
+                for name in ("deps:javascript", "typecheck:javascript", "test:javascript"):
+                    commands = self.task_commands(tasks[name])
+                    assert commands, name
+                    for command in commands:
+                        argv = self.resolved_command(command)
+                        assert Path(argv[0]).name == manager, argv
+                for name in ("check:markdown", "format:markdown"):
+                    commands = self.task_commands(tasks[name])
+                    assert commands, name
+                    for command in commands:
+                        argv = self.resolved_command(command)
+                        program = Path(argv[0]).name
+                        if manager == "npm" and program == "npx":
+                            continue
+                        assert program == manager, argv
+                        assert argv[1:2] == ["exec"], argv
+                for task in tasks.values():
+                    for command in self.task_commands(task):
+                        assert not any(Path(word).name in ("bun", "bunx") for word in command), command
+                assert not list(project.rglob("bun.lock"))
+                assert not list(project.rglob("bun.lockb"))
+                self.assert_central_dependencies(project, {"javascript", "markdown"})
+                self.assert_preserved(project, originals)
+                before = self.snapshot()
+                self.succeed(*arguments, project=project)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
+
+    def test_workspace_shared_dependency_backups_precede_commands_and_keep_original_lock(self) -> None:
+        for manager in ("npm", "pnpm", "yarn"):
+            with self.subTest(manager=manager):
+                project = self.sandbox / f"workspace-backups-{manager}"
+                project.mkdir()
+                originals, lockfile = self.workspace_project(project, manager)
+                commands = self.run_workspace_dependency_commands(project, manager, originals, lockfile)
+                assert commands
+                assert (project / lockfile).read_bytes() != originals[lockfile]
+                for relative in ("package.json", lockfile, "web/package.json", "docs/package.json"):
+                    self.assert_backup(project, relative, originals[relative])
+                for directory in ("web", "docs"):
+                    for name in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb"):
+                        assert not (project / directory / name).exists(), f"Unexpected nested workspace lock: {name}"
+                self.assert_preserved(
+                    project, {relative: contents for relative, contents in originals.items() if relative != lockfile}
+                )
+
     def test_tool_only_pyproject_uses_scripts_auto_mode_without_dependency_commands(self) -> None:
+        self.run_mock.side_effect = None
+        self.run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         manifest = '[tool.ruff]\nline-length = 88\ntarget-version = "py312"\n'
         self.write(self.project, "pyproject.toml", manifest)
         self.write(self.project, "report.py", 'print("report")\n')
@@ -913,11 +1171,18 @@ class InstallTests(unittest.TestCase):
         for task in data["tasks"].values():
             for command in self.task_commands(task):
                 assert "pytest" not in command
-                assert command[:2] != ["uv", "sync"]
+                assert command[:2] not in (["uv", "add"], ["uv", "sync"])
         assert (self.project / "pyproject.toml").read_bytes() == manifest.encode()
         assert not (self.project / "ruff.toml").exists()
         assert not (self.project / "uv.lock").exists()
-        self.run_mock.assert_not_called()
+        for command in self.recorded_commands():
+            argv = self.resolved_command(command)
+            program = Path(argv[0]).name
+            assert not (program == "uv" and argv[1:2] in (["add"], ["sync"])), argv
+            assert program not in {"npm", "npx", "pnpm", "yarn", "bun", "bunx", "pip", "pip3", "poetry", "pdm"}, argv
+            assert not (program.startswith("python") and argv[1:3] == ["-m", "pip"]), argv
+            assert "deps:python" not in argv, argv
+            assert "pytest" not in argv, argv
 
     def test_rust_install_tools_uses_inherited_root_toolchain_pin(self) -> None:
         self.run_mock.side_effect = None
@@ -1030,6 +1295,314 @@ class InstallTests(unittest.TestCase):
                 assert self.python_targets({"vars": variables}) == ["custom", "checks"]
                 assert variables["python_version"] == "3.12"
                 self.assert_preserved(project, {**originals, source: settings.encode()})
+
+    def test_central_aggregates_include_only_selected_available_language_tasks(self) -> None:
+        cases = (
+            ("python-project", ("python",), ()),
+            ("python-scripts", ("python",), ("--python-mode", "scripts")),
+            ("javascript", ("javascript",), ()),
+            ("rust", ("rust",), ()),
+            ("lua", ("lua",), ()),
+            ("markdown", ("markdown",), ()),
+            ("lua-rust", ("lua", "rust"), ()),
+        )
+        for label, languages, extra in cases:
+            with self.subTest(selection=label):
+                project = self.sandbox / f"central-{label}"
+                project.mkdir()
+                originals = {}
+                if label == "python-project":
+                    originals.update(self.python_project(project))
+                elif "python" in languages:
+                    self.write(project, "report.py", "pass\n")
+                if "javascript" in languages or "markdown" in languages:
+                    self.write(project, "package.json", "{}\n")
+                    originals["package.json"] = b"{}\n"
+                if "rust" in languages:
+                    cargo = '[package]\nname = "sample"\nversion = "0.1.0"\nedition = "2021"\n'
+                    self.write(project, "Cargo.toml", cargo)
+                    self.write(project, "src/lib.rs", "pub fn answer() -> u32 { 42 }\n")
+                    originals["Cargo.toml"] = cargo.encode()
+                unselected = "python" if "rust" in languages else "rust"
+                original_root = (
+                    '# Preserve unrelated project tasks.\n[tasks.build]\nrun = "echo custom build"\n'
+                    f'\n[tasks."check:{unselected}"]\nrun = "echo unselected check"\n'
+                    f'\n[tasks."test:{unselected}"]\nrun = "echo unselected tests"\n'
+                )
+                self.write(project, "mise.toml", original_root)
+                originals["mise.toml"] = original_root.encode()
+                self.succeed("--tools", *languages, *extra, "--apply", project=project)
+                self.assert_central_dependencies(project, set(languages))
+                central = self.central_tasks(project)
+                for language in languages:
+                    assert f"check:{language}" in central["check"]["depends"]
+                    assert f"format:{language}" in central["format"]["depends"]
+                if label in ("python-scripts", "javascript"):
+                    assert "test" not in central
+                if label == "python-scripts":
+                    assert "deps" not in central
+                self.assert_preserved(project, originals)
+                self.assert_backup(project, "mise.toml", original_root.encode())
+                agent = (project / "AGENTS.md").read_text(encoding="utf-8")
+                block = agent.split(START, 1)[1].split(END, 1)[0]
+                assert "mise run" in block
+                for name in central:
+                    pattern = rf"\bmise\s+run\s+{re.escape(name)}(?![\w:-])"
+                    assert re.search(pattern, block), f"Missing agent guidance for mise run {name}"
+                before = self.snapshot()
+                self.succeed("--tools", *languages, *extra, "--apply", project=project)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
+
+    def test_user_aggregate_collisions_and_existing_bare_tasks_are_preserved(self) -> None:
+        for root_name in ("mise.toml", ".mise.toml"):
+            for name in sorted(CENTRAL_TASKS):
+                with self.subTest(root=root_name, collision=name):
+                    project = self.sandbox / f"collision-{root_name}-{name.replace(':', '-')}"
+                    project.mkdir()
+                    original = (
+                        '# Keep project-owned entry points.\n[tasks.build]\nrun = "echo custom build"\n'
+                        '\n[tasks.test]\nrun = "echo custom test"\ndepends = ["build"]\n'
+                    )
+                    if name == "test":
+                        original += 'description = "User owned"\n'
+                    original += '\n[tasks.typecheck]\nrun = "echo custom typecheck"\n'
+                    if name != "test":
+                        original += (
+                            f'\n[tasks."{name}"]\nrun = "echo user aggregate"\n'
+                            'description = "User owned"\ndepends = ["build"]\n'
+                        )
+                    self.write(project, root_name, original)
+                    before_tasks = tomllib.loads(original)["tasks"]
+                    self.succeed("--tools", "lua", "--apply", project=project)
+                    root = self.root_mise(project)
+                    assert root.name == root_name
+                    with root.open("rb") as file:
+                        tasks = tomllib.load(file)["tasks"]
+                    for preserved in sorted({"build", "test", "typecheck", name}):
+                        assert tasks[preserved] == before_tasks[preserved]
+                        assert preserved not in self.central_tasks(project)
+                    self.assert_central_dependencies(project, {"lua"}, preserved_aggregates={name, "test"})
+                    self.assert_preserved(project, {root_name: original.encode()})
+                    before = self.snapshot()
+                    self.succeed("--tools", "lua", "--apply", project=project)
+                    assert self.snapshot() == before
+
+    def test_managed_aggregates_compose_with_explicit_tasks_parent_and_inline_children(self) -> None:
+        cases = (
+            ("shorthand", '[tasks]\nbuild = "echo existing build"\n'),
+            ("inline-child", '[tasks]\nbuild = { run = "echo existing build", description = "User owned" }\n'),
+            ("child-table", '[tasks]\n[tasks.build]\nrun = "echo existing build"\n'),
+            (
+                "inline-aggregate",
+                '[tasks]\nbuild = "echo existing build"\ncheck = { run = "echo user check", depends = ["build"] }\n',
+            ),
+            ("shorthand-aggregate", '[tasks]\nbuild = { run = "echo existing build" }\ncheck = "echo user check"\n'),
+        )
+        for label, source in cases:
+            with self.subTest(tasks_style=label):
+                project = self.sandbox / f"explicit-tasks-{label}"
+                project.mkdir()
+                original = "# Preserve the explicit tasks parent and user syntax.\n" + source
+                original_tasks = tomllib.loads(original)["tasks"]
+                root = self.write(project, "mise.toml", original)
+                self.succeed("--tools", "lua", "--apply", project=project)
+                with root.open("rb") as file:
+                    tasks = tomllib.load(file)["tasks"]
+                for name, task in original_tasks.items():
+                    assert tasks[name] == task, name
+                _, block, _ = self.managed_root_parts(root.read_bytes())
+                assert not re.search(rb"(?m)^[ \t]*\[tasks\][ \t]*(?:#.*)?$", block)
+                self.assert_central_dependencies(
+                    project, {"lua"}, preserved_aggregates=set(original_tasks) & CENTRAL_TASKS
+                )
+                self.assert_preserved(project, {"mise.toml": original.encode()})
+                self.assert_backup(project, "mise.toml", original.encode())
+                before = self.snapshot()
+                self.succeed("--tools", "lua", "--apply", project=project)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
+
+    def test_central_block_replacement_preserves_surroundings_and_updates_selection(self) -> None:
+        prefix = '# Exact prefix stays.\n\n[tasks.before]\nrun = "echo before"\n\n'
+        suffix = '\n\n# Exact suffix stays.\n[tasks.after]\nrun = "echo after"\n'
+        stale = (
+            '[tasks.check]\ndepends = ["check:rust"]\n'
+            '\n[tasks.format]\ndepends = ["format:rust"]\n'
+            '\n[tasks.test]\ndepends = ["test:rust"]\n'
+            '\n[tasks.deps]\ndepends = ["deps:python"]\n'
+        )
+        original = prefix + AGGREGATES_START + "\n" + stale + AGGREGATES_END + suffix
+        root = self.write(self.project, "mise.toml", original)
+        self.write(self.project, "report.py", "pass\n")
+        self.succeed("--tools", "lua", "--apply")
+        self.assert_central_dependencies(self.project, {"lua"})
+        self.assert_preserved(self.project, {"mise.toml": original.encode()})
+        self.assert_backup(self.project, "mise.toml", original.encode())
+        lua_root = root.read_bytes()
+        before = self.snapshot()
+        self.succeed("--tools", "lua", "--apply")
+        assert self.snapshot() == before
+        self.succeed("--tools", "python", "--python-mode", "scripts", "--apply")
+        self.assert_central_dependencies(self.project, {"python"})
+        central = self.central_tasks()
+        assert "check:python" in central["check"]["depends"]
+        assert "format:python" in central["format"]["depends"]
+        assert "test" not in central
+        assert "deps" not in central
+        self.assert_preserved(self.project, {"mise.toml": original.encode()})
+        assert any(path.read_bytes() == lua_root for path in self.backups(self.project, "mise.toml"))
+        before = self.snapshot()
+        self.succeed("--tools", "python", "--python-mode", "scripts", "--apply")
+        assert self.snapshot() == before
+
+    def test_malformed_root_toml_or_aggregate_markers_fail_before_any_writes(self) -> None:
+        start, end = AGGREGATES_START, AGGREGATES_END
+        invalid = (
+            start + "\n",
+            end + "\n",
+            end + "\n" + start + "\n",
+            start + "\n" + start + "\n" + end + "\n",
+            start + "\n" + end + "\n" + end + "\n",
+            start + "\n" + end + "\n" + start + "\n" + end + "\n",
+            start + "\n[tasks.\n" + end + "\n",
+            "[tools]\npython = [\n",
+        )
+        for root_index, root_name in enumerate(("mise.toml", ".mise.toml")):
+            for index, contents in enumerate(invalid):
+                with self.subTest(root=root_name, contents=contents):
+                    project = self.sandbox / f"invalid-central-{root_index}-{index}"
+                    project.mkdir()
+                    self.write(project, root_name, contents)
+                    self.write(project, "AGENTS.md", "# Keep local instructions\n")
+                    self.write(project, "stylua.toml", 'syntax = "Lua54"\n')
+                    self.refuse_without_writes("--tools", "lua", "--overwrite", "--apply", project=project)
+
+    def test_overwrite_preview_never_replaces_or_deletes_existing_configs(self) -> None:
+        self.write(self.project, "package.json", '{"private":true,"packageManager":"npm@10.9.2"}\n')
+        self.write(self.project, "mise.toml", '# Preserve existing root settings.\n[vars]\ncustom = "keep"\n')
+        self.write(self.project, "prettier.config.js", "export default { printWidth: 79 };\n")
+        self.write(self.project, ".prettierrc.json", '{"printWidth":81}\n')
+        self.write(self.project, "AGENTS.md", "# Preserve local instructions\n")
+        for mode in ((), ("--dry-run",)):
+            with self.subTest(mode=mode):
+                before = self.snapshot()
+                self.succeed("--tools", "markdown", "--overwrite", "--install-deps", *mode)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
+
+    def test_overwrite_rejects_outside_symlinks_before_config_replacement_or_deletion(self) -> None:
+        cases = (
+            ("markdown", "prettier.config.js", "export default {};\n"),
+            ("markdown", ".prettierrc.cjs", "module.exports = {};\n"),
+            ("markdown", ".prettierrc.toml", "printWidth = 79\n"),
+            ("rust", "rust-toolchain.toml", '[toolchain]\nchannel = "1.85.1"\n'),
+        )
+        for index, (tool, relative, contents) in enumerate(cases):
+            with self.subTest(tool=tool, config=relative):
+                project = self.sandbox / f"overwrite-symlink-{index}"
+                project.mkdir()
+                target = self.write(self.outside, f"config-{index}", contents)
+                (project / relative).symlink_to(target)
+                if tool == "rust":
+                    self.write(project, "Cargo.toml", '[package]\nname = "sample"\nversion = "0.1.0"\n')
+                    self.write(project, "src/lib.rs", "pub fn answer() -> u32 { 42 }\n")
+                    extra = ("--overwrite-rust-toolchain",)
+                else:
+                    self.write(project, "package.json", "{}\n")
+                    self.write(project, ".prettierrc.json", '{"printWidth":81}\n')
+                    extra = ()
+                self.write(project, "AGENTS.md", "# Existing local instructions\n")
+                self.refuse_without_writes("--tools", tool, "--overwrite", *extra, "--apply", project=project)
+
+    def test_overwrite_replaces_canonical_configs_and_cleans_up_alternates_with_backups(self) -> None:
+        cases = (
+            ("python", "ruff.toml", ".ruff.toml", "line-length = 79\n", "line-length = 81\n"),
+            (
+                "javascript",
+                "biome.json",
+                "biome.jsonc",
+                '{"formatter":{"lineWidth":79}}\n',
+                '{\n// Alternate config\n"formatter":{"lineWidth":81}\n}\n',
+            ),
+            ("lua", "stylua.toml", ".stylua.toml", "indent_width = 2\n", "indent_width = 3\n"),
+        )
+        for tool, canonical, alternate, original, old_alternate in cases:
+            with self.subTest(tool=tool):
+                project = self.sandbox / f"overwrite-cleanup-{tool}"
+                project.mkdir()
+                manifests = {}
+                if tool == "python":
+                    manifests.update(self.python_project(project, embedded=False))
+                elif tool == "javascript":
+                    self.write(project, "package.json", "{}\n")
+                    manifests["package.json"] = b"{}\n"
+                self.write(project, canonical, original)
+                self.write(project, alternate, old_alternate)
+                self.succeed("--tools", tool, "--overwrite", "--apply", project=project)
+                path = project / canonical
+                assert path.read_bytes() != original.encode()
+                if canonical.endswith(".json"):
+                    assert isinstance(json.loads(path.read_text(encoding="utf-8")), dict)
+                else:
+                    with path.open("rb") as file:
+                        tomllib.load(file)
+                assert not (project / alternate).exists(), "Obsolete alternate config was not removed"
+                self.assert_backup(project, canonical, original.encode())
+                self.assert_backup(project, alternate, old_alternate.encode())
+                self.assert_preserved(project, manifests)
+                before = self.snapshot()
+                self.succeed("--tools", tool, "--overwrite", "--apply", project=project)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
+
+    def test_explicit_rust_toolchain_overwrite_opt_in_replaces_pin_with_backup(self) -> None:
+        with (REPO_ROOT / "templates/rust/rust-toolchain.toml").open("rb") as file:
+            expected = tomllib.load(file)["toolchain"]["channel"]
+        for index, (relative, original) in enumerate(
+            (
+                ("engine/rust-toolchain.toml", '[toolchain]\nchannel = "1.85.1"\ncomponents = ["rustfmt"]\n'),
+                ("engine/rust-toolchain", "1.85.1\n"),
+            )
+        ):
+            with self.subTest(toolchain=relative):
+                project = self.sandbox / f"explicit-rust-overwrite-{index}"
+                project.mkdir()
+                files = {
+                    "engine/Cargo.toml": '[package]\nname = "engine"\nversion = "0.1.0"\nedition = "2021"\n',
+                    "engine/Cargo.lock": "version = 4\n",
+                    "engine/src/lib.rs": "pub fn answer() -> u32 { 42 }\n",
+                }
+                for path, contents in files.items():
+                    self.write(project, path, contents)
+                self.write(project, relative, original)
+                arguments = (
+                    "--tools",
+                    "rust",
+                    "--rust-dir",
+                    "engine",
+                    "--overwrite",
+                    "--overwrite-rust-toolchain",
+                    "--apply",
+                )
+                self.succeed(*arguments, project=project)
+                canonical = project / "engine/rust-toolchain.toml"
+                if canonical.exists():
+                    with canonical.open("rb") as file:
+                        assert tomllib.load(file)["toolchain"]["channel"] == expected
+                    if relative != "engine/rust-toolchain.toml":
+                        assert not (project / relative).exists(), "A legacy pin must not shadow the replacement"
+                    else:
+                        assert canonical.read_bytes() != original.encode()
+                else:
+                    assert relative == "engine/rust-toolchain"
+                    assert (project / relative).read_text(encoding="utf-8").strip() == expected
+                self.assert_backup(project, relative, original.encode())
+                self.assert_preserved(project, {path: contents.encode() for path, contents in files.items()})
+                before = self.snapshot()
+                self.succeed(*arguments, project=project)
+                assert self.snapshot() == before
+                self.run_mock.assert_not_called()
 
     def test_tools_are_required_and_unknown_choices_are_rejected(self) -> None:
         for arguments in ((), ("--tools", "unknown-tool")):

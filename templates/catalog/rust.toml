@@ -1,0 +1,36 @@
+schema_version = 1
+title = "Rust"
+profile = "mise/profiles/rust.toml"
+adapter = "rust"
+
+[aggregates]
+check = ["check:rust"]
+format = ["format:rust"]
+test = ["test:rust"]
+
+[[configs]]
+source = "rust/rust-toolchain.toml"
+kind = "rust-toolchain"
+alternatives = ["rust-toolchain.toml", "rust-toolchain"]
+
+[[configs]]
+source = "rust/rustfmt.toml"
+kind = "rustfmt"
+alternatives = ["rustfmt.toml", ".rustfmt.toml"]
+
+[[configs]]
+source = "rust/clippy.toml"
+kind = "clippy"
+alternatives = ["clippy.toml", ".clippy.toml"]
+
+[[guidance]]
+task = "check:rust"
+when = "After Rust edits, check rustfmt and Clippy for the locked workspace."
+
+[[guidance]]
+task = "format:rust"
+when = "When Rust formatting needs correction, run rustfmt."
+
+[[guidance]]
+task = "test:rust"
+when = "After Rust behavior changes, run locked workspace tests."

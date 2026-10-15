@@ -1,0 +1,37 @@
+schema_version = 1
+title = "Javascript"
+profile = "mise/profiles/javascript.toml"
+adapter = "javascript"
+aliases = ["typescript"]
+gitignore = "node_modules/\ndist/\nbuild/\ncoverage/\n"
+
+[aggregates]
+check = ["check:javascript", "typecheck:javascript"]
+format = ["format:javascript"]
+test = ["test:javascript"]
+deps = ["deps:javascript"]
+
+[[configs]]
+source = "biome/biome.json"
+kind = "biome"
+alternatives = ["biome.json", "biome.jsonc"]
+
+[[guidance]]
+task = "deps:javascript"
+when = "When JavaScript dependencies change or are missing, install the package dependencies."
+
+[[guidance]]
+task = "check:javascript"
+when = "After JavaScript or TypeScript edits, check lint, formatting, and import organization with Biome."
+
+[[guidance]]
+task = "format:javascript"
+when = "When formatting needs correction, run Biome formatting; this does not apply lint fixes."
+
+[[guidance]]
+task = "typecheck:javascript"
+when = "After TypeScript changes, run the package or existing project type check and its prerequisites."
+
+[[guidance]]
+task = "test:javascript"
+when = "After behavior changes, run the package or existing project tests and their prerequisites."

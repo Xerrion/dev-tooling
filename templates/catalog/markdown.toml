@@ -1,0 +1,32 @@
+schema_version = 1
+title = "Markdown"
+profile = "mise/profiles/markdown.toml"
+adapter = "markdown"
+gitignore = "node_modules/\ndist/\nbuild/\ncoverage/\n"
+
+[aggregates]
+check = ["check:markdown"]
+format = ["format:markdown"]
+
+[[configs]]
+source = "markdown/.markdownlint.json"
+kind = "markdownlint"
+alternatives = [".markdownlint.json", ".markdownlint.jsonc", ".markdownlint.yaml", ".markdownlint.yml"]
+
+[[configs]]
+source = "markdown/.prettierrc.json"
+kind = "prettier"
+alternatives = [".prettierrc.json", ".prettierrc", ".prettierrc.yaml", ".prettierrc.yml", ".prettierrc.toml", ".prettierrc.js", ".prettierrc.cjs", ".prettierrc.mjs", "prettier.config.js", "prettier.config.cjs", "prettier.config.mjs", "prettier.config.ts", ".prettierrc.ts"]
+
+[[configs]]
+source = "markdown/.prettierignore"
+kind = "ignore"
+alternatives = []
+
+[[guidance]]
+task = "check:markdown"
+when = "After Markdown edits, run Markdownlint and Prettier checks."
+
+[[guidance]]
+task = "format:markdown"
+when = "When Markdown formatting needs correction, run Prettier scoped to Markdown, not JavaScript or TypeScript."

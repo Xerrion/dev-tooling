@@ -1,0 +1,44 @@
+schema_version = 1
+title = "Python"
+profile = "mise/profiles/python.toml"
+adapter = "python"
+
+[aggregates]
+check = ["check:python"]
+format = ["format:python"]
+test = ["test:python"]
+deps = ["deps:python"]
+
+[[configs]]
+source = "python/ruff.toml"
+kind = "ruff"
+alternatives = ["ruff.toml", ".ruff.toml"]
+
+[[configs]]
+source = "python/ty.toml"
+kind = "ty"
+alternatives = ["ty.toml"]
+
+[[guidance]]
+task = "deps:python"
+when = "After dependency changes or before checks in a fresh checkout, sync the locked project environment."
+
+[[guidance]]
+task = "lint:python"
+when = "After Python edits, check Ruff lint and formatting."
+
+[[guidance]]
+task = "format:python"
+when = "When Python formatting needs correction, run the formatter."
+
+[[guidance]]
+task = "fix:python"
+when = "When applying safe Ruff lint fixes, review the resulting diff."
+
+[[guidance]]
+task = "typecheck:python"
+when = "After Python API, annotation, import, or dependency changes, check types with ty."
+
+[[guidance]]
+task = "test:python"
+when = "After behavior changes, run pytest quietly with short tracebacks; project markers, coverage, and plugins still apply."

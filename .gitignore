@@ -1,2 +1,5 @@
 /.tooling-backups/
 .ruff_cache/
+.venv/
+node_modules/
+**/__pycache__/**

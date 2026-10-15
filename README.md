@@ -8,7 +8,9 @@ The templates do not create application code or replace your project manifests.
 Run the root `install.py` from this repository with Python 3.14 or newer. It uses
 only the standard library and targets an existing project. Select `python`,
 `javascript` (`typescript` is an alias), `rust`, `lua`, or `markdown` with
-`--tools`.
+`--tools`. Preview and config generation need no installed tooling beyond
+Python. Installation flags require `mise` on `PATH`; installing Rust toolchains
+also requires an existing `rustup` installation.
 
 ```sh
 python3 install.py /Users/lasn/Projects/servicenow-platform-mcp --tools python
@@ -20,35 +22,58 @@ python3 install.py /Users/lasn/Projects/particle-foundry \
 
 The default is a preview: no files are written and no commands are executed,
 even when installation flags are supplied. Append `--apply` to write the
-selected configs, `.mise/conf.d/tooling.toml`, a managed block in `AGENTS.md`,
-and the `/.tooling-backups/` ignore entry in `.gitignore`.
+selected configs, `.mise/conf.d/tooling.toml`, managed blocks in the root mise
+config and `AGENTS.md`, and the `/.tooling-backups/` ignore entry in `.gitignore`.
+
+Language task implementations live in `.mise/conf.d/tooling.toml`. The installer
+uses `templates/mise/mise.toml` as the source for the central root block. It
+chooses an existing `.mise.toml` if present, otherwise `mise.toml`; it does not
+create a new `mise.toml` when `.mise.toml` exists. It appends or updates the
+managed block without replacing existing user content, tools, or tasks. The
+root aggregates `check`, `format`, `test`, and `deps` have explicit dependencies
+on selected, available language tasks. Aggregates with no dependencies are
+omitted; wildcard dependencies are not used, avoiding cycles through the
+aggregates themselves. Existing project tasks with those names are kept and
+reported instead of replaced.
 
 Installation is optional and requires `--apply` to execute:
 
 - `--install-tools` trusts the project's mise config and runs `mise install`,
   plus Rustup toolchain installation when Rust is selected.
 - `--install-deps` separately installs project dependencies, pytest for Python
-  project mode, and JavaScript/Markdown dependencies. It can change manifests
-  and lockfiles and run dependency build scripts.
+  project mode, and JavaScript/Markdown dependencies. It backs up current
+  dependency manifests and lockfiles before running commands, which can change
+  those files and run dependency build scripts. Backups do not provide a full
+  rollback of build-script side effects or environment changes.
 
 For configuration only, append `--apply` to either example. If installation is
 also wanted, append `--apply --install-tools --install-deps` instead. Review the
 preview first: installation can download packages and execute mise hooks or
 project and third-party code.
 
-Existing mise files stay untouched and higher-precedence settings can override
-the generated fragment. Existing tool pins and configs, including tool settings
-in `pyproject.toml`, are kept by default. Use `--replace-configs` to replace tool
-configs with backups under `.tooling-backups/<timestamp>-<UUID>/`. Existing Rust
-toolchain pins are never overwritten. Replacement of unsupported Prettier
-JavaScript or TOML configs is refused.
+The selected root mise file gains a managed block; existing user text before
+and after that block is preserved. Other existing mise files stay untouched,
+and higher-precedence settings can override the generated fragment. Existing
+tool pins and configs, including tool settings in `pyproject.toml`, are kept by
+default.
+
+To replace tool configs, append `--apply --overwrite` to either example
+(`--replace-configs` is an alias for `--overwrite`). Backups go under
+`.tooling-backups/<timestamp>-<UUID>/`. Obsolete alternative
+configs may be removed after backup. Incompatible Prettier JavaScript or TOML
+configs are backed up and removed, then a canonical `.prettierrc.json` is
+created. JSON is never written into a JavaScript or TOML config file. An
+embedded `prettier` field in `package.json` is removed after backing up the
+manifest so the canonical JSON config takes effect; other manifest values are
+preserved. `--overwrite` alone preserves existing Rust compiler pins; changing
+one also requires `--overwrite-rust-toolchain`.
 
 Instructions always go to `AGENTS.md` by default. Use `--agents-file AGENS.md`
 only if that literal filename is intended. Reruns replace only the block between
 `<!-- dev-tooling:start -->` and `<!-- dev-tooling:end -->` idempotently, keeping
 all text outside it. Supply the complete tool selection on each run: the
-fragment and managed instructions are regenerated, but old tool configs are not
-deleted.
+language fragment, central mise block, and managed instructions are regenerated.
+Deselecting a language does not delete its old tool configs.
 
 Language directories such as `--rust-dir` and `--javascript-dir` are relative to
 the target project; `--python-files` paths are relative to `--python-dir`.
@@ -65,9 +90,12 @@ JavaScript tasks use existing package scripts. If `typecheck` or `test` is
 missing, they delegate to the matching bare root mise task and its prerequisites
 unless that would create a cycle; otherwise they are omitted. The installer
 never invents package scripts. JavaScript and Markdown honor the existing
-`packageManager` and lockfile. When combining them in a fresh setup, use
-`--node-version` to resolve their conflicting default Node versions. Existing
-tool pins are kept.
+`packageManager` and lockfile. Workspace packages can inherit the root
+`packageManager`, and dependency backups include shared root lockfiles.
+Package-manager and workspace detection reads metadata directly without
+executing commands. When combining JavaScript and Markdown in a fresh setup,
+use `--node-version` to resolve their conflicting default Node versions.
+Existing tool pins are kept.
 
 ## Available configs
 
@@ -91,24 +119,37 @@ use the package directory selected by the profile's `*_dir` variable.
 
 ## Combining mise profiles
 
-Profiles live in `templates/mise/profiles/`.
+`templates/mise/mise.toml` is the central aggregate template. Language profiles
+live in `templates/mise/profiles/`. To copy them manually:
 
-1. For a single profile, copy it to the target project's `mise.toml`.
-2. To combine profiles, merge their `[tools]`, `[vars]`, and `[tasks.*]` entries
-   into that file. Do not concatenate whole files: repeated TOML table headers
-   are invalid.
-3. Resolve shared tool versions explicitly. JavaScript currently selects Node
+1. Use an existing `.mise.toml` for the central root config, otherwise
+   `mise.toml`. Copy `templates/mise/mise.toml` only for a new config. For an
+   existing file, merge missing aggregate definitions without replacing user
+   content, tools, or tasks.
+2. Merge the selected profiles' `[tools]`, `[vars]`, and `[tasks.*]` entries into
+   `.mise/conf.d/tooling.toml`. Do not concatenate whole files: repeated TOML
+   table headers are invalid.
+3. In the root template, keep only explicit dependencies on selected, available
+   language tasks for `check`, `format`, `test`, and `deps`. Keep existing project
+   tasks with those names. Omit aggregates with no dependencies. Do not use
+   wildcard dependencies, which can include the aggregates themselves and
+   create cycles.
+4. Resolve shared tool versions explicitly. JavaScript currently selects Node
    `26`, while Markdown selects `24.15.0`; choose one version for the project.
+   Preserve existing project pins unless intentionally changing them.
+5. Copy the selected tool configs from the table above. Merge existing settings
+   or back up configs before replacing them. Include the dotfiles; a shell `*`
+   glob usually skips them. Manual copying does not provide the installer's
+   backups or managed updates. For those, use `--apply --overwrite`; changing an
+   existing Rust compiler pin also requires `--overwrite-rust-toolchain`.
+6. Adjust the `*_dir` and `*_files` variables to match the project layout.
+7. Review the resulting configuration, then run `mise trust` and `mise install`
+   in the target project only when installation is wanted. Installation can
+   download tools and execute project or third-party code.
 
-4. Copy the selected configs from the table above. Merge settings if a config
-   already exists. Include the dotfiles; a shell `*` glob usually skips them.
-5. Adjust the `*_dir` and `*_files` variables to match the project layout.
-6. Review the resulting configuration, then run `mise trust` and `mise install`
-   in the target project. Installation can download tools.
-
-The profiles are fragments; mise does not automatically discover them in this
-repository's `templates/` directory. Task names are language-scoped so you can
-combine profiles without renaming their tasks.
+Mise does not automatically discover templates in this repository's
+`templates/` directory. After copying, the root config provides the aggregates
+and `.mise/conf.d/tooling.toml` supplies the language-scoped implementations.
 
 For reproducible CI runs, replace floating tool versions such as `latest`, `2`,
 or `stable` with exact versions and commit the project's dependency lockfiles.
