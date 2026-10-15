@@ -1,0 +1,17 @@
+[tools]
+lua = "5.1"
+stylua = "2.4.1"
+
+[vars]
+lua_dir = "."
+lua_files = "."
+
+[tasks."check:lua"]
+description = "Check Lua formatting with StyLua"
+dir = "{{ vars.lua_dir }}"
+run = "stylua --check {{ vars.lua_files }}"
+
+[tasks."format:lua"]
+description = "Format Lua with StyLua"
+dir = "{{ vars.lua_dir }}"
+run = "stylua {{ vars.lua_files }}"

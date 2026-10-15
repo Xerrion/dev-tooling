@@ -1,0 +1,87 @@
+target-version = "py314"
+line-length = 120
+preview = false
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+[lint]
+extend-select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+    "C4",   # flake8-comprehensions
+    "DTZ",  # flake8-datetimez
+    "T20",  # flake8-print
+    "PTH",  # flake8-use-pathlib
+    "TC",   # flake8-type-checking
+    "RET",  # flake8-return
+    "PLW",  # pylint warnings
+    "PT",   # flake8-pytest-style
+    "A",    # flake8-builtins
+    "COM",  # flake8-commas
+    "PIE",  # flake8-pie
+    "ISC",  # flake8-implicit-str-concat
+    "G",    # flake8-logging-format
+    "INP",  # flake8-no-pep420
+    "TID",  # flake8-tidy-imports
+    "ERA",  # eradicate (commented-out code)
+    "T10",  # flake8-debugger
+    "BLE",  # flake8-blind-except
+    "PLE",  # pylint errors
+    "PGH",  # pygrep-hooks (specific suppressions and mock assertions)
+    "LOG",  # flake8-logging
+    "ASYNC", # flake8-async
+    "S113", # HTTP requests without an explicit timeout
+    "S501", # HTTP requests with certificate verification disabled
+    "S506", # unsafe YAML loading
+    "S608", # possible SQL injection through string construction
+    "PERF101", # unnecessary list allocation before iteration
+    "PERF102", # inefficient dictionary iteration
+    "PERF402", # manual list copying
+    "FURB", # refurb (modern Python idioms)
+    "ICN",  # conventional import aliases
+    "ANN",  # required type annotations
+]
+# Leave comma placement and indentation to the formatter.
+ignore = ["COM812", "COM819", "W191"]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = [
+    "T20",    # print statements OK in tests
+    "ERA001", # commented-out code OK in tests
+    "PT019",  # underscore-prefixed fixtures are used for @patch and side-effect injection
+]
+
+[format]
+quote-style = "double"

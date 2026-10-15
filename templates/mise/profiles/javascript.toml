@@ -1,0 +1,34 @@
+[tools]
+node = "26"
+bun = "latest"
+biome = "2"
+
+[vars]
+javascript_dir = "."
+# Directories include every supported extension and nested file.
+javascript_files = "."
+
+[tasks."deps:javascript"]
+description = "Install JavaScript dependencies from bun.lock"
+dir = "{{ vars.javascript_dir }}"
+run = "bun install --frozen-lockfile"
+
+[tasks."check:javascript"]
+description = "Check lint and formatting with the project's Biome rules"
+dir = "{{ vars.javascript_dir }}"
+run = "biome check {{ vars.javascript_files }}"
+
+[tasks."format:javascript"]
+description = "Format files with the project's Biome rules"
+dir = "{{ vars.javascript_dir }}"
+run = "biome format --write {{ vars.javascript_files }}"
+
+[tasks."typecheck:javascript"]
+description = "Run the package's typecheck script"
+dir = "{{ vars.javascript_dir }}"
+run = "bun run typecheck"
+
+[tasks."test:javascript"]
+description = "Run the package's test script"
+dir = "{{ vars.javascript_dir }}"
+run = "bun run test"

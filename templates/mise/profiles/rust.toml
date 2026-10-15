@@ -1,0 +1,21 @@
+# rustup and the project's rust-toolchain.toml own the Rust version and components.
+[vars]
+rust_dir = "."
+
+[tasks."check:rust"]
+description = "Check Rust formatting and Clippy warnings"
+dir = "{{ vars.rust_dir }}"
+run = [
+  "cargo fmt --all -- --check",
+  "cargo clippy --locked --workspace --all-targets -- -D warnings",
+]
+
+[tasks."format:rust"]
+description = "Format the Rust workspace"
+dir = "{{ vars.rust_dir }}"
+run = "cargo fmt --all"
+
+[tasks."test:rust"]
+description = "Run Rust workspace tests with Cargo.lock"
+dir = "{{ vars.rust_dir }}"
+run = "cargo test --locked --workspace"
