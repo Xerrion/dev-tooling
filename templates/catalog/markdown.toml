@@ -1,7 +1,7 @@
 schema_version = 1
 title = "Markdown"
 profile = "mise/profiles/markdown.toml"
-adapter = "markdown"
+adapter = "generic"
 gitignore = "node_modules/\ndist/\nbuild/\ncoverage/\n"
 
 [aggregates]
@@ -11,7 +11,7 @@ format = ["format:markdown"]
 [[configs]]
 source = "markdown/.markdownlint.json"
 kind = "markdownlint"
-alternatives = [".markdownlint.json", ".markdownlint.jsonc", ".markdownlint.yaml", ".markdownlint.yml"]
+alternatives = [".markdownlint.json", ".markdownlint.jsonc", ".markdownlint.yaml", ".markdownlint.yml", ".markdownlint-cli2.jsonc", ".markdownlint-cli2.yaml", ".markdownlint-cli2.cjs", ".markdownlint-cli2.mjs"]
 
 [[configs]]
 source = "markdown/.prettierrc.json"
@@ -22,6 +22,11 @@ alternatives = [".prettierrc.json", ".prettierrc", ".prettierrc.yaml", ".prettie
 source = "markdown/.prettierignore"
 kind = "ignore"
 alternatives = []
+
+[[configs]]
+source = "markdown/.markdownlint-cli2.jsonc"
+kind = "markdownlint-cli2"
+alternatives = [".markdownlint-cli2.jsonc", ".markdownlint-cli2.yaml", ".markdownlint-cli2.cjs", ".markdownlint-cli2.mjs"]
 
 [[guidance]]
 task = "check:markdown"

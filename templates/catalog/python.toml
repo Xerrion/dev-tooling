@@ -1,4 +1,5 @@
 schema_version = 1
+dependency_files = ["pyproject.toml", "uv.lock"]
 title = "Python"
 profile = "mise/profiles/python.toml"
 adapter = "python"
