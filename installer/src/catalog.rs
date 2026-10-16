@@ -35,6 +35,12 @@ pub struct Guidance {
     pub task: String,
     pub when: String,
 }
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Detection {
+    pub files: Vec<String>,
+    pub extensions: Vec<String>,
+}
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tool {
@@ -45,6 +51,8 @@ pub struct Tool {
     pub adapter: Adapter,
     #[serde(default)]
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub detection: Detection,
     #[serde(default)]
     pub configs: Vec<Config>,
     #[serde(default)]
@@ -118,6 +126,20 @@ impl Catalog {
             let profile = inside(&catalog.root, &tool.profile)?;
             ensure!(profile.is_file(), "Missing profile: {}", profile.display());
             let data = load_toml(&profile)?;
+            for pattern in &tool.detection.files {
+                ensure!(
+                    !pattern.is_empty() && !pattern.contains(['/', '\\']),
+                    "Detection patterns must be filenames in {name}: {pattern}"
+                );
+                glob::Pattern::new(pattern)
+                    .with_context(|| format!("Invalid detection pattern in {name}: {pattern}"))?;
+            }
+            for extension in &tool.detection.extensions {
+                ensure!(
+                    !extension.is_empty() && extension.bytes().all(|c| c.is_ascii_alphanumeric()),
+                    "Invalid detection extension in {name}: {extension}"
+                );
+            }
             for section in ["tools", "vars", "tasks"] {
                 table(&data, section)?;
             }

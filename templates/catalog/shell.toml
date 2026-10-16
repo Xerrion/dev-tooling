@@ -1,0 +1,15 @@
+schema_version = 1
+title = "Shell"
+profile = "mise/profiles/shell.toml"
+aliases = ["shellcheck"]
+
+[detection]
+files = []
+extensions = ["sh", "bash", "bats"]
+
+[aggregates]
+check = ["check:shell"]
+
+[[guidance]]
+task = "check:shell"
+when = "After shell script edits, check the selected files with ShellCheck."

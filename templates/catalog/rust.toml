@@ -3,6 +3,10 @@ title = "Rust"
 profile = "mise/profiles/rust.toml"
 adapter = "rust"
 
+[detection]
+files = ["Cargo.toml"]
+extensions = []
+
 [aggregates]
 check = ["check:rust"]
 format = ["format:rust"]

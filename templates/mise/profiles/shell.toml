@@ -1,0 +1,12 @@
+[tools]
+shellcheck = "latest"
+
+[vars]
+shell_dir = "."
+# File patterns are relative to shell_dir. List nested paths explicitly if needed.
+shell_files = "*.sh"
+
+[tasks."check:shell"]
+description = "Check shell scripts with ShellCheck"
+dir = "{{ vars.shell_dir }}"
+run = "shellcheck -- {{ vars.shell_files }}"
