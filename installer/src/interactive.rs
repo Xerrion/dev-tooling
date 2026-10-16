@@ -91,8 +91,9 @@ pub fn confirm(input: &mut impl BufRead, output: &mut impl Write, prompt: &str) 
     if crate::ui::terminal() {
         return map_prompt(Confirm::new(&clean(prompt)).with_default(false).prompt());
     }
+    let prompt = format!("{prompt} [y/N]");
     loop {
-        let answer = ask(input, output, prompt, ui)?;
+        let answer = ask(input, output, &prompt, ui)?;
         match answer.to_ascii_lowercase().as_str() {
             "y" | "yes" => return Ok(true),
             "" | "n" | "no" => return Ok(false),
@@ -327,7 +328,7 @@ pub fn select(
     writeln!(output)?;
     if !options.install_tools {
         ui.hint(output, "mise can download tools and run project hooks.")?;
-        options.install_tools = confirm(input, output, "Install selected tools with mise? [y/N]")?;
+        options.install_tools = confirm(input, output, "Install selected tools with mise?")?;
     } else {
         ui.hint(output, "Tool installation enabled by your command.")?;
     }
@@ -343,7 +344,7 @@ pub fn select(
                 output,
                 "Dependency sync can download packages and run build scripts.",
             )?;
-            options.install_deps = confirm(input, output, "Sync project dependencies? [y/N]")?;
+            options.install_deps = confirm(input, output, "Sync project dependencies?")?;
         } else {
             ui.hint(output, "Dependency sync enabled by your command.")?;
         }
