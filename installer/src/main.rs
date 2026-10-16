@@ -51,15 +51,7 @@ fn run() -> Result<()> {
                 .take(3)
                 .map(|path| clean(&path.display().to_string()))
                 .collect::<Vec<_>>();
-            println!(
-                "DETECTED {id}: {}{}",
-                evidence.join(", "),
-                if found.evidence.len() > 3 {
-                    " (more matches)"
-                } else {
-                    ""
-                }
-            );
+            println!("DETECTED {id}: {}", evidence.join(", "));
         }
         if interactive_mode {
             interactive::select(

@@ -103,13 +103,31 @@ fn scan_skips_dependencies_build_output_hidden_directories_and_symlinks() {
 }
 
 #[test]
-fn scan_depth_limit_fails_without_partial_configuration() {
+fn scan_ignores_projects_below_two_nested_directory_levels() {
     let f = Fixture::new();
-    f.write(format!("{}README.md", "nested/".repeat(33)), "# Deep\n");
-    assert!(
-        f.refuse(&["--detect", "--apply"])
-            .contains("32 directory levels")
+    f.write("apps/web/package.json", "{}");
+    f.write("apps/team/mobile/package.json", "{}");
+
+    let stack = detect(&f.project, &Catalog::load(&templates()).unwrap()).unwrap();
+
+    assert_eq!(stack["javascript"].directories, [Path::new("apps/web")]);
+}
+
+#[test]
+fn source_detection_keeps_one_example_instead_of_every_matching_file() {
+    let f = Fixture::new();
+    for index in 0..64 {
+        f.write(format!("docs/chapter-{index:02}.md"), "# Chapter\n");
+    }
+
+    let stack = detect(&f.project, &Catalog::load(&templates()).unwrap()).unwrap();
+
+    assert_eq!(stack["markdown"].directories, [Path::new("docs")]);
+    assert_eq!(
+        stack["markdown"].evidence,
+        [Path::new("docs/chapter-00.md")]
     );
+    assert!(stack["markdown"].matched_files.is_empty());
 }
 
 #[test]
