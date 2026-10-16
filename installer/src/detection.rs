@@ -12,6 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const MAX_SCAN_DEPTH: usize = 2;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct DetectedTool {
     pub directories: Vec<PathBuf>,
@@ -20,10 +22,9 @@ pub struct DetectedTool {
 pub type DetectedStack = BTreeMap<String, DetectedTool>;
 
 fn scan(directory: &Path, root: &Path, files: &mut Vec<PathBuf>, depth: usize) -> Result<()> {
-    ensure!(
-        depth <= 32,
-        "Stack scan exceeded 32 directory levels; use --tools to select explicitly"
-    );
+    if depth > MAX_SCAN_DEPTH {
+        return Ok(());
+    }
     let mut entries = fs::read_dir(directory)
         .with_context(|| format!("Cannot scan {}", directory.display()))?
         .collect::<std::io::Result<Vec<_>>>()?;

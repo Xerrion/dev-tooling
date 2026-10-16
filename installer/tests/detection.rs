@@ -103,13 +103,14 @@ fn scan_skips_dependencies_build_output_hidden_directories_and_symlinks() {
 }
 
 #[test]
-fn scan_depth_limit_fails_without_partial_configuration() {
+fn scan_ignores_projects_below_two_nested_directory_levels() {
     let f = Fixture::new();
-    f.write(format!("{}README.md", "nested/".repeat(33)), "# Deep\n");
-    assert!(
-        f.refuse(&["--detect", "--apply"])
-            .contains("32 directory levels")
-    );
+    f.write("apps/web/package.json", "{}");
+    f.write("apps/team/mobile/package.json", "{}");
+
+    let stack = detect(&f.project, &Catalog::load(&templates()).unwrap()).unwrap();
+
+    assert_eq!(stack["javascript"].directories, [Path::new("apps/web")]);
 }
 
 #[test]

@@ -198,8 +198,9 @@ tooling instructions are excluded so reruns keep the same Markdown directory.
 It skips symlinks, hidden directories,
 and directories named `node_modules`, `target`, `vendor`, `dist`, `build`,
 `coverage`, `__pycache__`, or `venv`. Other Git ignore patterns do not affect
-detection. A scan exceeding 32 directory levels or 100,000 files stops with an
-error; use explicit `--tools` selections for such projects.
+detection. The scan checks the project root and up to two nested directory
+levels; deeper directories are ignored. A scan exceeding 100,000 files stops
+with an error; use explicit `--tools` selections for larger projects.
 
 A manifest directory takes precedence over matching manifests below it. Without
 a manifest, the nearest shared parent of the matching source files becomes the
