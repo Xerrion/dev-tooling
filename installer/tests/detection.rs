@@ -120,6 +120,30 @@ fn non_utf8_markdown_remains_filename_evidence() {
     assert_eq!(stack["markdown"].directories, [Path::new("docs")]);
 }
 
+#[cfg(unix)]
+#[test]
+fn noninteractive_detection_sanitizes_filename_evidence() {
+    let f = Fixture::new();
+    f.write("docs/\x1b]0;spoofed\x07.md", "# Document\n");
+
+    let output = f.succeed(&["--detect"]);
+
+    assert!(!output.contains('\x1b'));
+    assert!(!output.contains('\x07'));
+    assert!(output.contains("DETECTED markdown: docs/]0;spoofed.md"));
+
+    let f = Fixture::new();
+    f.write("apps/\x1b]0;spoofed\x07/package.json", "{}");
+    f.write("apps/other/package.json", "{}");
+
+    let (_, output) = f.invoke(&["--detect"]);
+
+    assert!(!output.contains('\x1b'));
+    assert!(!output.contains('\x07'));
+    assert!(output.contains("Multiple javascript project directories detected"));
+    assert!(output.contains("apps/]0;spoofed, apps/other"));
+}
+
 #[test]
 fn independent_project_directories_require_an_explicit_choice() {
     let f = Fixture::new();

@@ -175,7 +175,7 @@ pub fn resolve_directories(options: &mut Options, stack: &DetectedStack) -> Resu
                 found
                     .directories
                     .iter()
-                    .map(|p| p.display().to_string())
+                    .map(|p| crate::ui::clean(&p.display().to_string()))
                     .collect::<Vec<_>>()
                     .join(", ")
             );

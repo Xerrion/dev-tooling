@@ -5,8 +5,14 @@ use std::{
     process::ExitCode,
 };
 use xerrion_dev_tooling_installer::{
-    build_plan, catalog::Catalog, cli, data::shell_join, detection, interactive,
-    plan::display_relative, templates_directory, ui::Ui,
+    build_plan,
+    catalog::Catalog,
+    cli,
+    data::shell_join,
+    detection, interactive,
+    plan::display_relative,
+    templates_directory,
+    ui::{Ui, clean},
 };
 fn run() -> Result<()> {
     let args: Vec<_> = std::env::args_os().collect();
@@ -42,7 +48,7 @@ fn run() -> Result<()> {
                 .evidence
                 .iter()
                 .take(3)
-                .map(|path| path.display().to_string())
+                .map(|path| clean(&path.display().to_string()))
                 .collect::<Vec<_>>();
             println!(
                 "DETECTED {id}: {}{}",
