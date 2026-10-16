@@ -71,6 +71,42 @@ These examples use Markdown, which needs no project dependencies. Replace
 Keep the binary with this repository's `templates/` directory. If you move it,
 pass `--templates /path/to/templates` when running it.
 
+## Download a release
+
+Download the archive for Linux x64, macOS Intel, macOS Apple Silicon, or Windows
+x64 from [Releases](https://github.com/Xerrion/xerrion-dev-tooling/releases).
+Extract it into an empty directory. The archive contains only `installer`
+(`installer.exe` on Windows) at its root and the required `templates/` directory,
+including hidden configuration files. Keep them together. Rust is not needed
+to run the downloaded installer.
+
+From the extracted directory, preview a Markdown setup:
+
+```sh
+./installer /path/to/your/project --tools markdown
+```
+
+In Windows PowerShell, use `./installer.exe`. Add `--apply` to write the setup.
+Install mise to install tools and run the generated tasks. `SHA256SUMS` on the
+release contains checksums for all four archives.
+
+## Publish a release
+
+1. Merge the release workflow and the changes you want to release into `main`.
+   Set `version` in `installer/Cargo.toml` and update `installer/Cargo.lock` when
+   changing the version.
+2. Open **Actions > Release > Run workflow**, select `main`, and enter a new tag
+   matching the Cargo version, such as `v0.1.0`. Existing tags are rejected.
+3. Run the workflow. It runs `mise run check` and `mise run test` on Linux, builds
+   all four platforms with `mise run build:installer:release`, and tests preview
+   and apply from each extracted archive before publishing
+   the release, its archives, and checksums. Tags containing a prerelease suffix,
+   such as `v0.2.0-rc.1`, create a prerelease.
+
+The release tag points to the selected workflow commit. A failed build or package
+test prevents publication. GitHub also supplies its standard source archives;
+use the platform archives to get the compiled installer.
+
 ## Choose languages and directories
 
 Run the installer examples below from this repository's root. Run mise tasks

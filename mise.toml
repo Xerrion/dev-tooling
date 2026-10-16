@@ -24,3 +24,8 @@ description = "Run tests for all selected languages"
 description = "Build the Rust installer"
 dir = "installer"
 run = "cargo build --locked"
+
+[tasks."build:installer:release"]
+description = "Build the release installer"
+dir = "installer"
+run = "cargo build --release --locked --bin installer"
