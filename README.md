@@ -107,7 +107,7 @@ pass `--templates /path/to/templates` when running it.
 ## Download a release
 
 Download the archive for Linux x64, macOS Intel, macOS Apple Silicon, or Windows
-x64 from [Releases](https://github.com/Xerrion/xerrion-dev-tooling/releases).
+x64 from [Releases](https://github.com/Xerrion/dev-tooling/releases).
 Extract it into an empty directory. The archive contains only `installer`
 (`installer.exe` on Windows) at its root and the required `templates/` directory,
 including hidden configuration files. Keep them together. Rust is not needed
