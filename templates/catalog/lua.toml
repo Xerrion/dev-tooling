@@ -3,6 +3,10 @@ title = "Lua"
 profile = "mise/profiles/lua.toml"
 adapter = "generic"
 
+[detection]
+files = []
+extensions = ["lua"]
+
 [aggregates]
 check = ["check:lua"]
 format = ["format:lua"]

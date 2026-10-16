@@ -108,6 +108,39 @@ fn new_tool_is_loaded_by_the_same_binary_without_recompilation() {
     assert!(!root.path().join("project/.tooling-backups").exists());
 }
 #[test]
+fn catalog_detection_rules_are_loaded_without_recompilation() {
+    let root = fixture();
+    let path = root.path().join("templates/catalog/demo.toml");
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        format!("{text}\n[detection]\nfiles = ['demo.*']\nextensions = ['example']\n"),
+    )
+    .unwrap();
+    write(root.path(), "project/subdir/demo.project", "");
+    let catalog = Catalog::load(&root.path().join("templates")).unwrap();
+    let stack =
+        xerrion_dev_tooling_installer::detection::detect(&root.path().join("project"), &catalog)
+            .unwrap();
+    assert_eq!(stack["demo"].directories, [Path::new("subdir")]);
+    let output = run(root.path(), &["--detect", "--apply"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.path().join("project/subdir/demo.json").exists());
+    for rule in [
+        "files = ['../outside']",
+        "files = ['[']",
+        "extensions = ['.demo']",
+    ] {
+        fs::write(&path, format!("{text}\n[detection]\n{rule}\n")).unwrap();
+        assert!(Catalog::load(&root.path().join("templates")).is_err());
+    }
+}
+
+#[test]
 fn malformed_catalog_fails_without_writing_target() {
     for replacement in [
         ("schema_version = 1", "schema_version = 2"),

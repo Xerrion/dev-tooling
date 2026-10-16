@@ -1,10 +1,14 @@
 schema_version = 1
 dependency_files = ["package.json", "bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"]
-title = "Javascript"
+title = "JavaScript / TypeScript"
 profile = "mise/profiles/javascript.toml"
 adapter = "javascript"
 aliases = ["typescript"]
 gitignore = "node_modules/\ndist/\nbuild/\ncoverage/\n"
+
+[detection]
+files = ["package.json", "tsconfig.json"]
+extensions = ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "svelte", "vue"]
 
 [aggregates]
 check = ["check:javascript", "typecheck:javascript"]
@@ -27,7 +31,7 @@ when = "After JavaScript or TypeScript edits, check lint, formatting, and import
 
 [[guidance]]
 task = "format:javascript"
-when = "When formatting needs correction, run Biome formatting; this does not apply lint fixes."
+when = "When formatting or safe lint fixes need correction, run Biome check with write enabled; this also organizes imports."
 
 [[guidance]]
 task = "typecheck:javascript"

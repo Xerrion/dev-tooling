@@ -2,8 +2,12 @@ pub mod adapters;
 pub mod catalog;
 pub mod cli;
 pub mod data;
+pub mod detection;
+pub mod interactive;
 pub mod plan;
 pub mod project;
+pub mod selector;
+pub mod ui;
 
 use anyhow::{Context, Result, bail, ensure};
 use catalog::{Adapter, Catalog};
@@ -110,6 +114,11 @@ pub fn build_plan(args: &Options, catalog: &Catalog) -> Result<Plan> {
         }
         let directory = &directories[id];
         profile["vars"][format!("{id}_dir")] = json!(display_relative(&project, directory)?);
+        for (name, value) in &args.detected_vars {
+            if name.starts_with(&format!("{id}_")) {
+                profile["vars"][name] = json!(value);
+            }
+        }
         match catalog.tools[id].adapter {
             Adapter::Python => adapters::python(
                 &mut profile,

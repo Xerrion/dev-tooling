@@ -10,6 +10,8 @@ depends = [
   "check:rust",
   "check:lua",
   "check:markdown",
+  "check:shell",
+  "check:docker",
 ]
 
 [tasks."format"]

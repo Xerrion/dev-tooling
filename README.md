@@ -12,6 +12,8 @@ tasks that you can run from your project root.
 | `rust`                       | rustfmt, Clippy, Cargo      | Formatting, linting, and workspace tests                                |
 | `lua`                        | StyLua                      | Formatting checks and formatting                                        |
 | `markdown`                   | markdownlint-cli2, Prettier | Markdown linting and formatting                                         |
+| `shell` or `shellcheck`      | ShellCheck                  | Shell script linting                                                    |
+| `docker` or `hadolint`       | Hadolint, Docker            | Dockerfile linting, image builds, and container runs                    |
 
 Your project must already exist. The installer configures development tools;
 it does not create an application, a Cargo workspace, or a JavaScript package.
@@ -22,6 +24,34 @@ You need [Rust installed through rustup](https://rust-lang.org/tools/install/)
 to build the installer, and [mise](https://mise.jdx.dev/getting-started.html)
 to install tools and run the generated tasks. Both must be available in your
 terminal.
+
+Start interactive setup from this repository:
+
+```sh
+./installer/target/release/installer /path/to/your/project
+```
+
+Build the binary first using step 1 below. The installer detects supported
+tooling, shows the matching files, and lets you change the selection and each
+working directory. It asks separately about installing tools and syncing
+dependencies, then displays the plan before asking whether to apply it.
+Press Enter at the final prompt to keep the preview without writing files.
+Omit the project path to use the current directory.
+
+Setup has four steps: tooling, directories, installation preferences, and
+review. On macOS and Linux terminals, use the arrow keys to move through the
+tooling checklist, Space to toggle a tool, and Enter to continue. Press `a` to
+toggle all tools or Esc to cancel. Detected tools start selected, with the
+matching files shown beside them.
+
+Basic terminals, Windows, and piped input use a numbered list. Enter numbers
+or tool names separated by spaces, or type `all`. Invalid answers and directory
+paths can be corrected at the same prompt. Type `q` to cancel at any prompt.
+
+The review groups new, updated, and removed files and lists installation
+commands separately. Type `details` at the apply prompt to inspect all plan
+notes. Press Enter to keep the preview. Output respects `NO_COLOR` and
+`CLICOLOR=0`; redirected output contains no terminal control codes.
 
 These examples use Markdown, which needs no project dependencies. Replace
 `/path/to/your/project` with your project's directory.
@@ -138,6 +168,54 @@ To see the available selections and options:
 ./installer/target/release/installer --help
 ```
 
+### Automatic stack detection
+
+For scripts and CI, use `--detect` to select tooling from project files without
+prompts. It previews by default; add `--apply` to write the configuration:
+
+```sh
+./installer/target/release/installer /path/to/your/project --detect
+```
+
+Detection uses the following catalog rules, in a fixed order:
+
+| Selection    | Manifest or filename matches                                              | Source extensions used when no manifest matches                       |
+| ------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `javascript` | `package.json`, `tsconfig.json`                                           | `js`, `jsx`, `mjs`, `cjs`, `ts`, `tsx`, `mts`, `cts`, `svelte`, `vue` |
+| `python`     | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements*.txt`, `Pipfile` | `py`                                                                  |
+| `rust`       | `Cargo.toml`                                                              | None                                                                  |
+| `docker`     | `Dockerfile`, `Dockerfile.*`, `Containerfile`, `Containerfile.*`          | None                                                                  |
+| `lua`        | None                                                                      | `lua`                                                                 |
+| `markdown`   | None                                                                      | `md`, `markdown`                                                      |
+| `shell`      | None                                                                      | `sh`, `bash`, `bats`                                                  |
+
+The scan sorts paths and selections. It matches filenames without executing
+project code or checking installed tools. Files containing only generated
+tooling instructions are excluded so reruns keep the same Markdown directory.
+It skips symlinks, hidden directories,
+and directories named `node_modules`, `target`, `vendor`, `dist`, `build`,
+`coverage`, `__pycache__`, or `venv`. Other Git ignore patterns do not affect
+detection. A scan exceeding 32 directory levels or 100,000 files stops with an
+error; use explicit `--tools` selections for such projects.
+
+A manifest directory takes precedence over matching manifests below it. Without
+a manifest, the nearest shared parent of the matching source files becomes the
+working directory. Independent manifest directories require a choice through
+`--interactive` or an explicit directory option such as `--javascript-dir web`.
+Existing mise directory and file settings take precedence over detection.
+
+Detected shell tasks list every matching script inside the selected directory,
+including nested scripts. Detected Docker tasks lint all matching Dockerfiles
+inside that directory. Builds prefer `Dockerfile`, then `Containerfile`, then
+the first matching path in sorted order. Override `docker_file` to choose
+another build file. Detection does not inspect Docker Compose files.
+
+Explicit `--tools` selections bypass detection and remain suitable for scripts.
+Without a terminal, omitting both `--tools` and `--detect` fails instead of
+waiting for input. Use `--interactive` to request prompts explicitly, including
+with piped input. Add `--dry-run` to suppress the final apply prompt and keep
+the setup as a preview. `--apply` explicitly authorizes applying the plan.
+
 ## Run your daily checks
 
 Run these commands from your project's root:
@@ -176,9 +254,9 @@ those names. If neither is available, the corresponding task is omitted with
 a warning. TypeScript configuration stays with your application.
 
 Biome's preset uses two-space indentation and an 88-character line width.
-`mise run format:javascript` formats files. For Biome's safe lint fixes and
-import organization, run `mise exec -- biome check --write .` from the
-JavaScript directory. Keep generated files in that directory's `.gitignore`.
+`mise run format:javascript` formats files and applies Biome's safe lint fixes,
+including import organization. `mise run check:javascript` reports issues
+without changing files. Keep generated files in that directory's `.gitignore`.
 
 ### Python projects and scripts
 
@@ -226,6 +304,84 @@ Existing toolchain pins are preserved. A project without a toolchain file gets
 one selecting nightly with rustfmt and Clippy. Pin an exact compiler version in
 `rust-toolchain.toml` when you need reproducible builds.
 
+### Shell scripts
+
+Choose `shell` to add ShellCheck. To check scripts in a `scripts/` directory,
+preview this command, then repeat it with `--apply`:
+
+```sh
+./installer/target/release/installer /path/to/your/project \
+  --tools shell --shell-dir scripts --install-tools
+```
+
+The profile adds `mise run check:shell` to the shared `mise run check` command.
+`shellcheck` is also accepted as a selection name.
+
+The default file pattern is `*.sh`, relative to `shell_dir`. It checks files
+directly in that directory. To include nested paths or scripts without a `.sh`
+extension, set `shell_files` in your root mise configuration:
+
+```toml
+[vars]
+shell_files = "*.sh lib/*.sh deploy"
+```
+
+Keep a shebang such as `#!/bin/sh` or `#!/usr/bin/env bash` in each script so
+ShellCheck can select its dialect. Existing `.shellcheckrc` settings are used.
+This profile adds linting only; it has no formatter or test task.
+
+### Docker
+
+Preview Dockerfile linting with [Hadolint](https://github.com/hadolint/hadolint):
+
+```sh
+./installer/target/release/installer /path/to/your/project \
+  --tools docker --install-tools
+```
+
+Add `--apply` to write the setup. The profile adds `mise run check:docker` to
+the shared `mise run check` command. `hadolint` is also accepted as a selection
+name. Hadolint runs directly, so a Docker daemon is not required.
+
+By default, it checks `Dockerfile` in the project root. Use `--docker-dir docker`
+or `--dir docker=docker` for another existing directory. To check several files,
+set `docker_files` in your root mise configuration. Paths and patterns are
+relative to `docker_dir`; quote paths containing spaces inside the value:
+
+```toml
+[vars]
+docker_files = "Dockerfile Dockerfile.dev 'images/api service/Dockerfile'"
+```
+
+Hadolint uses existing `.hadolint.yaml` or `.hadolint.yml` settings. It has no
+formatter or test task.
+
+To build and run your application, install Docker separately and start its
+daemon, then run these tasks from your project root:
+
+```sh
+mise run build:docker
+mise run run:docker
+```
+
+`build:docker` builds `Dockerfile` with the current directory as its context and
+tags the image `app:local`. `run:docker` builds the image first, then runs it in
+the foreground and removes the container when it exits. Both tasks run inside
+`docker_dir`. Configure them in your root mise file, for example:
+
+```toml
+[vars]
+docker_file = "Dockerfile.dev"
+docker_context = "."
+docker_image = "my-app:dev"
+docker_build_args = "--build-arg NODE_ENV=development"
+docker_run_args = "-p 3000:3000 --env-file .env"
+```
+
+`docker_file` selects one file for builds; `docker_files` selects files for
+linting. Build file and context paths are relative to `docker_dir`. Docker
+Compose validation is outside this profile's scope.
+
 ### Lua and Markdown
 
 The Lua preset uses Lua 5.1 syntax, four-space indentation, and a 100-character
@@ -234,7 +390,7 @@ line width. Adjust `syntax` in `stylua.toml` for another Lua dialect.
 Markdown tools are installed globally through mise. They need no `package.json`
 and add no project dependencies. The generated tasks format Markdown files
 only and respect Git ignore rules. Existing markdownlint-cli2 configs keep
-their own ignore settings.
+the generated `.markdownlint-cli2.jsonc` combines rule settings and CLI2 options.
 
 ## What changes in your project
 
@@ -311,6 +467,8 @@ For a tool that is not listed, add a TOML profile under
 The profile defines versions and commands; the catalog connects it to the
 installer and any config templates. The existing Lua files provide a small
 example. These additions are loaded at runtime and need no Rust rebuild.
+Add optional `[detection]` rules with `files` (filename glob patterns) and
+`extensions` (without dots) to include the tool in automatic detection.
 Special behavior such as detecting a new project format may require Rust changes.
 
 ## Working on this repository

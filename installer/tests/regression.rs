@@ -21,6 +21,133 @@ fn test_explicit_dry_run_does_not_write() {
     f.succeed(&["--tools", "python", "--dry-run"]);
     assert_eq!(snapshot(&f.root), before);
 }
+
+#[test]
+fn shellcheck_profile_respects_directory_selection_and_preserves_scripts() {
+    for (selection, directory, extra) in [
+        ("shell", ".", vec![]),
+        ("shell", "scripts", vec!["--shell-dir", "scripts"]),
+        (
+            "shellcheck",
+            "release scripts",
+            vec!["--dir", "shell=release scripts"],
+        ),
+    ] {
+        let f = Fixture::new();
+        let relative = Path::new(directory).join("check script.sh");
+        let script = "#!/bin/sh\nprintf '%s\\n' 'Checked'\n";
+        let config = "# Project ShellCheck settings\nshell=sh\n";
+        f.write(&relative, script);
+        f.write(".shellcheckrc", config);
+        assert!(f.succeed(&["--help"]).contains("--shell-dir"));
+        assert!(f.succeed(&["--list-tools"]).contains("shell: Shell"));
+
+        let args = [vec!["--tools", selection], extra].concat();
+        let before = snapshot(&f.root);
+        let preview =
+            f.succeed(&[args.clone(), vec!["--install-tools", "--install-deps"]].concat());
+        assert!(preview.contains("mise install"));
+        assert_eq!(snapshot(&f.root), before);
+
+        let apply = [args, vec!["--apply"]].concat();
+        f.succeed(&apply);
+        let data = generated(&f.project);
+        assert_eq!(data["vars"]["shell_dir"], directory);
+        assert_eq!(data["vars"]["shell_files"], "*.sh");
+        assert!(data["tools"].get("shellcheck").is_some());
+        assert_eq!(data["tasks"]["check:shell"]["dir"], "{{ vars.shell_dir }}");
+        assert_central_dependencies(&f.project, &["shell"], &[]);
+        let central = central_tasks(&f.project);
+        for name in ["format", "test", "deps"] {
+            assert!(central.get(name).is_none());
+        }
+        assert!(read(&f.project, "AGENTS.md").contains("mise run check:shell"));
+        assert_eq!(read(&f.project, &relative), script);
+        assert_eq!(read(&f.project, ".shellcheckrc"), config);
+        assert!(backups(&f.project, ".shellcheckrc").is_empty());
+        let before = snapshot(&f.root);
+        f.succeed(&apply);
+        assert_eq!(snapshot(&f.root), before);
+    }
+}
+
+#[test]
+fn docker_profile_respects_directory_selection_and_preserves_dockerfiles() {
+    for (selection, directory, extra) in [
+        ("docker", ".", vec![]),
+        ("docker", "docker", vec!["--docker-dir", "docker"]),
+        (
+            "hadolint",
+            "container files",
+            vec!["--dir", "hadolint=container files"],
+        ),
+    ] {
+        let f = Fixture::new();
+        let relative = Path::new(directory).join("Dockerfile");
+        let dockerfile = "FROM alpine:3.22\nCMD [\"/bin/sh\"]\n";
+        let config_path = Path::new(directory).join(".hadolint.yaml");
+        let config = "ignored:\n  - DL3007\n";
+        f.write(&relative, dockerfile);
+        f.write(&config_path, config);
+        assert!(f.succeed(&["--help"]).contains("--docker-dir"));
+        assert!(f.succeed(&["--list-tools"]).contains("docker: Docker"));
+
+        let args = [vec!["--tools", selection], extra].concat();
+        let before = snapshot(&f.root);
+        let preview =
+            f.succeed(&[args.clone(), vec!["--install-tools", "--install-deps"]].concat());
+        assert!(preview.contains("mise install"));
+        assert!(!preview.contains("mise run deps:docker"));
+        assert_eq!(snapshot(&f.root), before);
+
+        let apply = [args, vec!["--apply"]].concat();
+        f.succeed(&apply);
+        let data = generated(&f.project);
+        assert_eq!(data["vars"]["docker_dir"], directory);
+        assert_eq!(data["vars"]["docker_files"], "Dockerfile");
+        assert!(data["tools"].get("hadolint").is_some());
+        assert_eq!(
+            data["tasks"]["check:docker"]["dir"],
+            "{{ vars.docker_dir }}"
+        );
+        assert_central_dependencies(&f.project, &["docker"], &[]);
+        let central = central_tasks(&f.project);
+        for name in ["format", "test", "deps"] {
+            assert!(central.get(name).is_none());
+        }
+        assert!(read(&f.project, "AGENTS.md").contains("mise run check:docker"));
+        assert_eq!(read(&f.project, &relative), dockerfile);
+        assert_eq!(read(&f.project, &config_path), config);
+        assert!(backups(&f.project, &config_path).is_empty());
+        let before = snapshot(&f.root);
+        f.succeed(&apply);
+        assert_eq!(snapshot(&f.root), before);
+    }
+}
+
+#[test]
+fn docker_combines_with_other_tools_and_preserves_mise_overrides() {
+    let f = Fixture::new();
+    f.write("containers/Dockerfile", "FROM scratch\n");
+    let original = "[tools]\nhadolint = '2.12.0'\n[vars]\ndocker_dir = 'containers'\ndocker_files = \"Dockerfile 'api service/Dockerfile'\"\n";
+    f.write("mise.toml", original);
+    let args = ["--tools", "docker", "shell", "markdown", "--apply"];
+    f.succeed(&args);
+    assert_root_preserved(&root_mise(&f.project), original.as_bytes());
+    let root = toml_file(root_mise(&f.project));
+    assert_eq!(root["tools"]["hadolint"], "2.12.0");
+    assert_eq!(root["vars"]["docker_dir"], "containers");
+    assert_eq!(
+        root["vars"]["docker_files"],
+        "Dockerfile 'api service/Dockerfile'"
+    );
+    assert!(generated(&f.project)["vars"].get("docker_dir").is_none());
+    assert_central_dependencies(&f.project, &["docker", "shell", "markdown"], &[]);
+    let before = snapshot(&f.root);
+    f.succeed(&args);
+    assert_eq!(snapshot(&f.root), before);
+}
+
 #[test]
 fn test_python_project_preserves_embedded_configs_and_manifests() {
     let f = Fixture::new();
@@ -219,7 +346,7 @@ fn test_existing_standalone_and_alternate_configs_are_not_shadowed() {
         (
             "markdown",
             ".markdownlint.yaml",
-            ".markdownlint.json",
+            ".markdownlint-cli2.jsonc",
             "MD013: false\n",
         ),
         (
@@ -318,7 +445,7 @@ fn test_monorepo_merges_profiles_preserves_pins_and_delegates_root_tasks() {
         "engine/clippy.toml",
         "lua/stylua.toml",
         "lua/.styluaignore",
-        "docs/.markdownlint.json",
+        "docs/.markdownlint-cli2.jsonc",
         "docs/.prettierrc.json",
         "docs/.prettierignore",
     ] {
@@ -329,7 +456,7 @@ fn test_monorepo_merges_profiles_preserves_pins_and_delegates_root_tasks() {
         "biome.json",
         "rustfmt.toml",
         "stylua.toml",
-        ".markdownlint.json",
+        ".markdownlint-cli2.jsonc",
     ] {
         assert!(!f.project.join(rel).exists());
     }
@@ -407,7 +534,7 @@ fn test_only_selected_tool_configs_and_tasks_are_installed() {
         "ty.toml",
         "biome.json",
         "rust-toolchain.toml",
-        ".markdownlint.json",
+        ".markdownlint-cli2.jsonc",
     ] {
         assert!(!f.project.join(name).exists());
     }
@@ -865,11 +992,16 @@ fn test_other_mise_fragment_supplies_directories_node_pin_and_existing_tasks() {
         "scripts/ruff.toml",
         "scripts/ty.toml",
         "web/biome.json",
-        "docs/.markdownlint.json",
+        "docs/.markdownlint-cli2.jsonc",
     ] {
         assert!(f.project.join(rel).is_file());
     }
-    for rel in ["ruff.toml", "ty.toml", "biome.json", ".markdownlint.json"] {
+    for rel in [
+        "ruff.toml",
+        "ty.toml",
+        "biome.json",
+        ".markdownlint-cli2.jsonc",
+    ] {
         assert!(!f.project.join(rel).exists());
     }
     assert_preserved(&f.project, &originals);
@@ -1225,7 +1357,10 @@ fn test_markdown_preserves_existing_cli2_configuration() {
         f.write("package.json", "{\"private\":true}\n");
         f.write(relative, text);
         let output = f.succeed(&["--tools", "markdown", "--apply"]);
-        assert!(!f.project.join(".markdownlint.json").exists());
+        assert_eq!(
+            f.project.join(".markdownlint-cli2.jsonc").exists(),
+            relative == ".markdownlint-cli2.jsonc"
+        );
         assert_eq!(read(&f.project, relative), text);
         assert!(backups(&f.project, relative).is_empty());
         assert!(output.contains("KEEP"));

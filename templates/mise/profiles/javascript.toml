@@ -19,9 +19,9 @@ dir = "{{ vars.javascript_dir }}"
 run = "biome check {{ vars.javascript_files }}"
 
 [tasks."format:javascript"]
-description = "Format files with the project's Biome rules"
+description = "Format files and apply Biome's safe fixes, including import organization"
 dir = "{{ vars.javascript_dir }}"
-run = "biome format --write {{ vars.javascript_files }}"
+run = "biome check --write {{ vars.javascript_files }}"
 
 [tasks."typecheck:javascript"]
 description = "Run the package's typecheck script"

@@ -4,6 +4,10 @@ title = "Python"
 profile = "mise/profiles/python.toml"
 adapter = "python"
 
+[detection]
+files = ["pyproject.toml", "setup.py", "setup.cfg", "requirements*.txt", "Pipfile"]
+extensions = ["py"]
+
 [aggregates]
 check = ["check:python"]
 format = ["format:python"]

@@ -1,0 +1,23 @@
+schema_version = 1
+title = "Docker"
+profile = "mise/profiles/docker.toml"
+aliases = ["hadolint"]
+
+[detection]
+files = ["Dockerfile", "Dockerfile.*", "Containerfile", "Containerfile.*"]
+extensions = []
+
+[aggregates]
+check = ["check:docker"]
+
+[[guidance]]
+task = "check:docker"
+when = "After Dockerfile edits, check the selected files with Hadolint."
+
+[[guidance]]
+task = "build:docker"
+when = "To build the configured Docker image, use Docker with a running daemon."
+
+[[guidance]]
+task = "run:docker"
+when = "To build and run the configured Docker image, start a container that is removed on exit."

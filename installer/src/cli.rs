@@ -18,6 +18,7 @@ pub struct Options {
     pub python_mode: String,
     pub node_version: Option<String>,
     pub agents_file: String,
+    pub detected_vars: BTreeMap<String, String>,
 }
 pub fn command(catalog: &Catalog) -> Command {
     let mut cmd = Command::new("installer")
@@ -25,14 +26,15 @@ pub fn command(catalog: &Catalog) -> Command {
         .about("Preview or apply tooling profiles from a TOML catalog")
         .arg(
             Arg::new("project")
-                .required_unless_present("list-tools")
+                .default_value(".")
                 .help("Existing project directory"),
         )
         .arg(
             Arg::new("tools")
                 .long("tools")
                 .num_args(1..)
-                .required_unless_present("list-tools")
+                .conflicts_with("detect")
+                .help("Explicit tooling selection; omit for interactive setup")
                 .value_parser(
                     catalog
                         .tools
@@ -41,6 +43,19 @@ pub fn command(catalog: &Catalog) -> Command {
                         .cloned()
                         .collect::<Vec<_>>(),
                 ),
+        )
+        .arg(
+            Arg::new("detect")
+                .long("detect")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("interactive")
+                .help("Select detected tooling without prompts; preview unless --apply is set"),
+        )
+        .arg(
+            Arg::new("interactive")
+                .long("interactive")
+                .action(ArgAction::SetTrue)
+                .help("Prompt for tooling and directories, including when input is piped"),
         )
         .arg(
             Arg::new("templates")
@@ -163,5 +178,6 @@ pub fn options(matches: &ArgMatches, catalog: &Catalog) -> Result<Options> {
         python_mode: get("python-mode").unwrap_or_default(),
         node_version: get("node-version"),
         agents_file: get("agents-file").unwrap_or_default(),
+        detected_vars: BTreeMap::new(),
     })
 }

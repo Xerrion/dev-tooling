@@ -1,0 +1,28 @@
+[tools]
+hadolint = "latest"
+
+[vars]
+docker_dir = "."
+# File paths and patterns are relative to docker_dir.
+docker_files = "Dockerfile"
+docker_file = "Dockerfile"
+docker_context = "."
+docker_image = "app:local"
+docker_build_args = ""
+docker_run_args = ""
+
+[tasks."check:docker"]
+description = "Check Dockerfiles with Hadolint"
+dir = "{{ vars.docker_dir }}"
+run = "hadolint {{ vars.docker_files }}"
+
+[tasks."build:docker"]
+description = "Build the Docker image"
+dir = "{{ vars.docker_dir }}"
+run = "docker build {{ vars.docker_build_args }} --file {{ vars.docker_file | quote }} --tag {{ vars.docker_image | quote }} {{ vars.docker_context | quote }}"
+
+[tasks."run:docker"]
+description = "Build and run the Docker image, removing the container on exit"
+dir = "{{ vars.docker_dir }}"
+depends = ["build:docker"]
+run = "docker run --rm {{ vars.docker_run_args }} {{ vars.docker_image | quote }}"
