@@ -18,6 +18,7 @@ const MAX_SCAN_DEPTH: usize = 2;
 pub struct DetectedTool {
     pub directories: Vec<PathBuf>,
     pub evidence: Vec<PathBuf>,
+    pub matched_files: Vec<PathBuf>,
 }
 pub type DetectedStack = BTreeMap<String, DetectedTool>;
 
@@ -151,11 +152,18 @@ pub fn detect(project: &Path, catalog: &Catalog) -> Result<DetectedStack> {
                 .cloned()
                 .collect()
         };
+        let matched_files = if id == "docker" || id == "shell" {
+            evidence.clone()
+        } else {
+            Vec::new()
+        };
+        let evidence = evidence.into_iter().take(1).collect();
         stack.insert(
             id.clone(),
             DetectedTool {
                 directories,
                 evidence,
+                matched_files,
             },
         );
     }
@@ -205,7 +213,7 @@ pub fn file_defaults(options: &mut Options, stack: &DetectedStack) -> Result<()>
             .unwrap_or(".");
         let base = inside(&root, rel)?;
         let mut paths = found
-            .evidence
+            .matched_files
             .iter()
             .filter_map(|path| {
                 root.join(path)

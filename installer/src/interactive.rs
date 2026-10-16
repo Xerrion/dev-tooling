@@ -153,11 +153,7 @@ pub fn select(
                 .get(id)
                 .map(|found| {
                     let first = found.evidence[0].display();
-                    if found.evidence.len() == 1 {
-                        format!("detected: {first}")
-                    } else {
-                        format!("detected: {first} (+{})", found.evidence.len() - 1)
-                    }
+                    format!("detected: {first}")
                 })
                 .unwrap_or_else(|| "optional".into());
             PromptItem {

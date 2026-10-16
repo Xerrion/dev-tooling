@@ -114,6 +114,23 @@ fn scan_ignores_projects_below_two_nested_directory_levels() {
 }
 
 #[test]
+fn source_detection_keeps_one_example_instead_of_every_matching_file() {
+    let f = Fixture::new();
+    for index in 0..64 {
+        f.write(format!("docs/chapter-{index:02}.md"), "# Chapter\n");
+    }
+
+    let stack = detect(&f.project, &Catalog::load(&templates()).unwrap()).unwrap();
+
+    assert_eq!(stack["markdown"].directories, [Path::new("docs")]);
+    assert_eq!(
+        stack["markdown"].evidence,
+        [Path::new("docs/chapter-00.md")]
+    );
+    assert!(stack["markdown"].matched_files.is_empty());
+}
+
+#[test]
 fn non_utf8_markdown_remains_filename_evidence() {
     let f = Fixture::new();
     f.write("docs/example.md", [0xff, 0xfe]);
