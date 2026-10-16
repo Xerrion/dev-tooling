@@ -18,9 +18,10 @@ pub struct Ui {
 }
 
 pub fn terminal() -> bool {
+    let terminal_type = std::env::var("TERM");
     io::stdin().is_terminal()
         && io::stdout().is_terminal()
-        && std::env::var("TERM").is_ok_and(|term| term != "dumb")
+        && !matches!(terminal_type.as_deref(), Ok("dumb"))
 }
 
 pub fn clean(text: &str) -> String {

@@ -6,7 +6,6 @@ pub mod detection;
 pub mod interactive;
 pub mod plan;
 pub mod project;
-pub mod selector;
 pub mod ui;
 
 use anyhow::{Context, Result, bail, ensure};

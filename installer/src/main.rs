@@ -32,6 +32,7 @@ fn run() -> Result<()> {
             && io::stdout().is_terminal());
     let ui = Ui::current();
     if interactive_mode {
+        interactive::configure_prompts(ui.color);
         ui.intro(&options.project.canonicalize()?, &mut io::stdout())?;
     }
     if options.tools.is_empty() || interactive_mode {

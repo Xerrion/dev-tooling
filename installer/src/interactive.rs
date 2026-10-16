@@ -4,12 +4,15 @@ use crate::{
     detection::DetectedStack,
     plan::{Plan, inside},
     project,
-    selector::{self, Item},
     ui::{Ui, clean},
 };
 use anyhow::{Result, ensure};
+use inquire::{
+    Confirm, InquireError, MultiSelect, Select, Text, list_option::ListOption, ui::RenderConfig,
+    validator::Validation,
+};
 use std::{
-    fmt,
+    fmt::{self, Display, Formatter},
     io::{BufRead, Write},
 };
 
@@ -22,7 +25,50 @@ impl fmt::Display for Cancelled {
 }
 impl std::error::Error for Cancelled {}
 
+pub fn configure_prompts(color: bool) {
+    inquire::set_global_render_config(if color {
+        RenderConfig::default_colored()
+    } else {
+        RenderConfig::empty()
+    });
+}
+
+struct PromptItem {
+    id: String,
+    title: String,
+    hint: String,
+}
+
+impl Display for PromptItem {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{:<24}  {}",
+            clean(&self.title),
+            clean(&self.hint)
+        )
+    }
+}
+
+fn map_prompt<T>(result: std::result::Result<T, InquireError>) -> Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(InquireError::OperationCanceled) => Err(Cancelled.into()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn ask(input: &mut impl BufRead, output: &mut impl Write, prompt: &str, ui: Ui) -> Result<String> {
+    if crate::ui::terminal() {
+        let answer = map_prompt(Text::new(&clean(prompt)).prompt())?;
+        if matches!(
+            answer.to_ascii_lowercase().as_str(),
+            "q" | "quit" | "cancel"
+        ) {
+            return Err(Cancelled.into());
+        }
+        return Ok(answer.trim().into());
+    }
     write!(output, "    {} {} ", ui.accent(">"), clean(prompt))?;
     output.flush()?;
     let mut line = String::new();
@@ -30,7 +76,7 @@ fn ask(input: &mut impl BufRead, output: &mut impl Write, prompt: &str, ui: Ui) 
         input.read_line(&mut line)? > 0,
         "Input ended; no changes applied"
     );
-    if !ui.live {
+    if !crate::ui::terminal() {
         writeln!(output)?;
     }
     let line = line.trim();
@@ -42,6 +88,9 @@ fn ask(input: &mut impl BufRead, output: &mut impl Write, prompt: &str, ui: Ui) 
 
 pub fn confirm(input: &mut impl BufRead, output: &mut impl Write, prompt: &str) -> Result<bool> {
     let ui = Ui::current();
+    if crate::ui::terminal() {
+        return map_prompt(Confirm::new(&clean(prompt)).with_default(false).prompt());
+    }
     loop {
         let answer = ask(input, output, prompt, ui)?;
         match answer.to_ascii_lowercase().as_str() {
@@ -52,7 +101,7 @@ pub fn confirm(input: &mut impl BufRead, output: &mut impl Write, prompt: &str) 
     }
 }
 
-fn parse_selection(text: &str, catalog: &Catalog, items: &[Item]) -> Result<Vec<String>> {
+fn parse_selection(text: &str, catalog: &Catalog, items: &[PromptItem]) -> Result<Vec<String>> {
     if text.eq_ignore_ascii_case("all") {
         return Ok(items.iter().map(|item| item.id.clone()).collect());
     }
@@ -95,7 +144,7 @@ pub fn select(
     } else {
         options.tools.clone()
     };
-    let mut items = catalog
+    let items = catalog
         .tools
         .iter()
         .map(|(id, tool)| {
@@ -110,11 +159,10 @@ pub fn select(
                     }
                 })
                 .unwrap_or_else(|| "optional".into());
-            Item {
+            PromptItem {
                 id: id.clone(),
                 title: tool.title.clone(),
                 hint,
-                selected: defaults.contains(id),
             }
         })
         .collect::<Vec<_>>();
@@ -127,15 +175,41 @@ pub fn select(
         ui.hint(output, "Detected tools are already selected.")?;
     }
     writeln!(output)?;
-    options.tools = if let Some(selected) = selector::choose(&mut items, ui, input, output)? {
-        selected
+    options.tools = if crate::ui::terminal() {
+        let default_indexes = items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| defaults.contains(&item.id).then_some(index))
+            .collect::<Vec<_>>();
+        map_prompt(
+            MultiSelect::new("Choose your tooling", items)
+                .with_default(&default_indexes)
+                .with_help_message(
+                    "↑/↓ move · Space toggle · → select all · ← clear · type to filter · Enter continue · Esc cancel",
+                )
+                .with_validator(|selected: &[ListOption<&PromptItem>]| {
+                    if selected.is_empty() {
+                        Ok(Validation::Invalid("Choose at least one tool.".into()))
+                    } else {
+                        Ok(Validation::Valid)
+                    }
+                })
+                .prompt(),
+        )?
+        .into_iter()
+        .map(|item| item.id)
+        .collect()
     } else {
         for (index, item) in items.iter().enumerate() {
             writeln!(
                 output,
                 "    {}  [{}] {:<24} {}",
                 index + 1,
-                if item.selected { "x" } else { " " },
+                if defaults.contains(&item.id) {
+                    "x"
+                } else {
+                    " "
+                },
                 clean(&item.title),
                 ui.muted(&item.hint)
             )?;
@@ -280,6 +354,30 @@ pub fn select(
 pub fn approve(plan: &Plan, input: &mut impl BufRead, output: &mut impl Write) -> Result<bool> {
     let ui = Ui::current();
     writeln!(output)?;
+    if crate::ui::terminal() {
+        loop {
+            match map_prompt(
+                Select::new(
+                    "Apply this setup?",
+                    vec![
+                        "Apply setup".to_owned(),
+                        "Show plan details".to_owned(),
+                        "Keep preview".to_owned(),
+                    ],
+                )
+                .with_starting_cursor(2)
+                .with_help_message("↑/↓ move · Enter choose · Esc cancel")
+                .prompt(),
+            )?
+            .as_str()
+            {
+                "Apply setup" => return Ok(true),
+                "Show plan details" => ui.details(plan, output)?,
+                "Keep preview" => return Ok(false),
+                _ => unreachable!("approval choices are fixed"),
+            }
+        }
+    }
     ui.hint(
         output,
         "Enter keeps this preview. Type details for all plan notes, or q to cancel.",

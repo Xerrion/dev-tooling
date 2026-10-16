@@ -39,19 +39,22 @@ Press Enter at the final prompt to keep the preview without writing files.
 Omit the project path to use the current directory.
 
 Setup has four steps: tooling, directories, installation preferences, and
-review. On macOS and Linux terminals, use the arrow keys to move through the
-tooling checklist, Space to toggle a tool, and Enter to continue. Press `a` to
-toggle all tools or Esc to cancel. Detected tools start selected, with the
-matching files shown beside them.
+review. On interactive terminals, use the arrow keys to move through the
+tooling checklist, Space to toggle a tool, the right arrow to select all, and
+the left arrow to clear the selection. Type to filter the list, Enter to
+continue, or Esc to cancel. Detected tools start selected, with matching files
+shown beside them.
 
-Basic terminals, Windows, and piped input use a numbered list. Enter numbers
-or tool names separated by spaces, or type `all`. Invalid answers and directory
-paths can be corrected at the same prompt. Type `q` to cancel at any prompt.
+Piped input and terminals without interactive support use a numbered list.
+Enter numbers or tool names separated by spaces, or type `all`. Invalid answers
+and directory paths can be corrected at the same prompt. Press Esc to cancel in
+interactive terminals; type `q` to cancel numbered prompts.
 
 The review groups new, updated, and removed files and lists installation
-commands separately. Type `details` at the apply prompt to inspect all plan
-notes. Press Enter to keep the preview. Output respects `NO_COLOR` and
-`CLICOLOR=0`; redirected output contains no terminal control codes.
+commands separately. Choose Show plan details to inspect all plan notes, Apply
+setup to write changes, or Keep preview to exit without writing. Keep preview
+is selected by default. Output respects `NO_COLOR` and `CLICOLOR=0`; redirected
+output contains no terminal control codes.
 
 These examples use Markdown, which needs no project dependencies. Replace
 `/path/to/your/project` with your project's directory.
